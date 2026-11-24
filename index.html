@@ -1767,7 +1767,7 @@ async function cloudStart(){
     cloudUploadPending();
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-CL.lastLoad>60e3)cloudRefresh()});
     return true;
-  }catch(e){console.warn('cloud',e);CL.on=false;setTimeout(()=>toast('サーバーにつながらないため、この端末の中だけで動いています'),800);return false}
+  }catch(e){console.warn('cloud',e);CL.on=false;const why=String(e&&(e.message||e.code||e)||'').slice(0,120);setTimeout(()=>toast('サーバーにつながらないため、この端末の中だけで動いています'+(why?'（'+why+'）':'')),800);return false}
 }
 async function cloudRefresh(){if(!CL.on)return;try{await cloudLoad();renderAll()}catch(e){console.warn(e)}}
 
