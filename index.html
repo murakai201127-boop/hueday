@@ -365,6 +365,11 @@ svg.map.moving .rc2,svg.map.moving .rc3{display:none}
 .mapcanvas{width:100%;height:100%;position:relative}
 #glMap{position:absolute;inset:0}
 .glpin{pointer-events:none;line-height:0}.glpin svg{overflow:visible}.glpin .pin{pointer-events:auto;cursor:pointer}
+.heredot{position:relative;width:22px;height:22px;pointer-events:none}
+.heredot i{position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%);border-radius:50%;background:rgba(47,123,224,.16);border:1px solid rgba(47,123,224,.3)}
+.heredot b{position:absolute;inset:3px;border-radius:50%;background:#2f7be0;border:3px solid #fff;box-shadow:0 1px 6px #0005}
+.heredot b::after{content:'';position:absolute;inset:-9px;border-radius:50%;border:2px solid #2f7be0;opacity:0;animation:herepulse 2s ease-out infinite}
+@keyframes herepulse{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.6);opacity:0}}
 </style>
 <link rel="stylesheet" href="vendor/maplibre-gl.css" onerror="this.remove()">
 <link rel="manifest" href="manifest.json">
@@ -1202,7 +1207,7 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act],[data-view],[data-mode],[data-z]');if(!b)return;
   if(b.dataset.view){show(b.dataset.view);return}
   if(b.dataset.mode){S.mode=b.dataset.mode;save();renderAll();return}
-  if(b.dataset.z){const z=b.dataset.z;z==='here'?(mainMap.here&&S.here&&S.here.gps?mainMap.here(S.here):fitHome(mainMap)):z==='world'?mainMap.fit(null):z==='jp'?mainMap.fit(pathGen.bounds(JP)):mainMap.zoom(z==='in'?1.6:1/1.6);return}
+  if(b.dataset.z){const z=b.dataset.z;z==='here'?locateNow():z==='world'?mainMap.fit(null):z==='jp'?mainMap.fit(pathGen.bounds(JP)):mainMap.zoom(z==='in'?1.6:1/1.6);return}
   const a=b.dataset.act,id=b.dataset.id,p=id&&posts.find(x=>x.id===id);
   if(a==='close')closeSheet();
   else if(a==='prof'){closeSheet();S.profUser=b.dataset.u;show('prof')}
@@ -1620,7 +1625,16 @@ function homeBounds(){
   const c=countryById[r.cc];return c?pathGen.bounds(c):pathGen.bounds(JP);
 }
 function fitHome(m){m.fit(homeBounds())}
-function tryLocate(){try{if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(pos=>{const r=locate(pos.coords.longitude,pos.coords.latitude);S.here={gps:true,lat:pos.coords.latitude,lon:pos.coords.longitude,label:r?(r.mc?prefName[r.pc]+' '+muniName(r.mc):cName(r.cc)):'現在地'};save();if(S.mapUser==='me'){mainMap.here?mainMap.here(S.here):fitHome(mainMap)}if(S.view==='disc')renderDisc()},()=>{},{timeout:6000,maximumAge:600000})}catch{}}
+function hereFromPos(pos){const r=locate(pos.coords.longitude,pos.coords.latitude);return {gps:true,lat:pos.coords.latitude,lon:pos.coords.longitude,acc:pos.coords.accuracy,label:r?(r.mc?prefName[r.pc]+' '+muniName(r.mc):cName(r.cc)):'現在地'}}
+let hereWatch=null;
+function tryLocate(){try{if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(pos=>{S.here=hereFromPos(pos);save();mainMap.setHere&&mainMap.setHere(S.here);if(S.mapUser==='me'){mainMap.here?mainMap.here(S.here):fitHome(mainMap)}if(S.view==='disc')renderDisc();
+  if(mainMap.setHere&&hereWatch==null)hereWatch=navigator.geolocation.watchPosition(p=>{S.here=hereFromPos(p);mainMap.setHere(S.here)},()=>{},{enableHighAccuracy:true,maximumAge:15000})},()=>{},{timeout:8000,maximumAge:600000,enableHighAccuracy:true})}catch{}}
+/* 「現在地」ボタン：その場で位置を取り直して移動。許可されていなければ案内 */
+function locateNow(){if(!mainMap.here||!navigator.geolocation){fitHome(mainMap);return}
+  navigator.geolocation.getCurrentPosition(pos=>{S.here=hereFromPos(pos);save();mainMap.setHere(S.here);mainMap.here(S.here);
+    if(hereWatch==null)hereWatch=navigator.geolocation.watchPosition(p=>{S.here=hereFromPos(p);mainMap.setHere(S.here)},()=>{},{enableHighAccuracy:true,maximumAge:15000})},
+   err=>{if(err&&err.code===1)toast('位置情報がオフです。iPhoneの「設定」→「プライバシーとセキュリティ」→「位置情報サービス」→「Safari」で「使用中のみ」にしてください');else{toast('現在地を取得できませんでした');fitHome(mainMap)}},
+   {enableHighAccuracy:true,timeout:10000,maximumAge:0})}
 
 /* ---------- 詳しい地図（MapLibre＋自前の地図ファイル） ----------
    自分のサイト（GitHub Pages）やアプリ版では、建物・道路・店名まで入った地図を使う。
@@ -1666,8 +1680,14 @@ function makeGLMap(el,{onTap}={}){
   function fitUser(uid){const fs=(Array.isArray(uid)?uid:ofUser(uid)).filter(p=>p.mc||p.cc).flatMap(p=>!p.mc?[countryById[p.cc]]:S.mode==='pref'?MF.filter(f=>f.pc===p.pc):[muniByCode[p.mc]]).filter(Boolean);
     if(!fs.length){fit(pathGen.bounds(JP));return}let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(const f of fs){const b=pathGen.bounds(f);x0=Math.min(x0,b[0][0]);y0=Math.min(y0,b[0][1]);x1=Math.max(x1,b[1][0]);y1=Math.max(y1,b[1][1])}fit([[x0,y0],[x1,y1]])}
   function paint(uid){const isL=Array.isArray(uid);lastMine=(isL?uid:ofUser(uid)).filter(p=>p.mc||p.cc);lastG=!isL&&String(uid).startsWith('g:');drawPins();return {}}
+  let hereMk=null;
+  function setHere(hh){if(!hh||hh.lat==null){if(hereMk){hereMk.remove();hereMk=null}return}
+    if(!hereMk){const d=document.createElement('div');d.className='heredot';d.innerHTML='<i></i><b></b>';hereMk=new maplibregl.Marker({element:d,anchor:'center'}).setLngLat([hh.lon,hh.lat]).addTo(map)}
+    else hereMk.setLngLat([hh.lon,hh.lat]);
+    const acc=hereMk.getElement().querySelector('i');if(hh.acc){const mpp=156543.03*Math.cos(hh.lat*Math.PI/180)/Math.pow(2,map.getZoom());const r=Math.max(18,Math.min(240,hh.acc/mpp));acc.style.width=acc.style.height=(r*2)+'px'}}
+  map.on('zoom',()=>{if(hereMk&&S.here&&S.here.gps)setHere(S.here)});
   window.addEventListener('resize',()=>map.resize());
-  return {gl:true,map,paint,fit,fitUser,redrawPins:drawPins,zoom:f=>map.easeTo({zoom:map.getZoom()+Math.log2(f),duration:260}),
+  return {gl:true,map,setHere,paint,fit,fitUser,redrawPins:drawPins,zoom:f=>map.easeTo({zoom:map.getZoom()+Math.log2(f),duration:260}),
     here:h=>map.flyTo({center:[h.lon,h.lat],zoom:Math.max(map.getZoom(),15),duration:900}),
     restyle:()=>{map.setStyle(glStyle())}}
 }
@@ -1684,7 +1704,7 @@ function makeGLMap(el,{onTap}={}){
     if(f)openRegion(f,S.mapUser)};
   if(useGL){$('#mainMap').remove();document.querySelector('.mapattr')?.remove();mainMap=makeGLMap($('#glMap'),{onTap:mapTap});document.body.classList.add('glmode')}
   else mainMap=makeMap($('#mainMap'),{filterable:true,noFill:true,detail:true,onTap:mapTap});
-  applyTheme();startI18n();$('#loading').remove();renderAll();show('map');syncCam();fitHome(mainMap);tryLocate();handleInvite();
+  applyTheme();startI18n();$('#loading').remove();renderAll();show('map');syncCam();if(mainMap.setHere&&S.here&&S.here.gps)mainMap.setHere(S.here);fitHome(mainMap);tryLocate();handleInvite();
   window.addEventListener('hashchange',handleInvite);
 })();
 }
