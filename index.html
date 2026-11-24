@@ -370,6 +370,13 @@ svg.map.moving .rc2,svg.map.moving .rc3{display:none}
 .heredot b{position:absolute;inset:3px;border-radius:50%;background:#2f7be0;border:3px solid #fff;box-shadow:0 1px 6px #0005}
 .heredot b::after{content:'';position:absolute;inset:-9px;border-radius:50%;border:2px solid #2f7be0;opacity:0;animation:herepulse 2s ease-out infinite}
 @keyframes herepulse{0%{transform:scale(.5);opacity:.7}100%{transform:scale(1.6);opacity:0}}
+#onboard{position:fixed;inset:0;z-index:9999;background:var(--bg,#fff);display:grid;place-items:center;padding:24px}
+#onboard .obx{width:100%;max-width:340px;display:grid;gap:14px;justify-items:center;text-align:center}
+#onboard h2{margin:4px 0 0;font:800 22px -apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif}
+#onboard p{margin:0;color:var(--sub,#666);font-size:14px}
+#onboard input{width:100%;box-sizing:border-box;font-size:17px;padding:13px 14px;border-radius:12px;border:1px solid var(--line,#ddd);background:var(--soft,#f5f5f5);color:inherit;text-align:center}
+#onboard .btn{width:100%}
+#onboard .obnote{font-size:12px}#onboard .oberr{color:#e0443e;font-size:13px;min-height:1em}
 </style>
 <link rel="stylesheet" href="vendor/maplibre-gl.css" onerror="this.remove()">
 <link rel="manifest" href="manifest.json">
@@ -451,6 +458,7 @@ svg.map.moving .rc2,svg.map.moving .rc3{display:none}
 <script src="vendor/maplibre-gl.js"></script>
 <script src="vendor/pmtiles.js"></script>
 <script src="vendor/basemaps.js"></script>
+<script src="vendor/supabase.js"></script>
 <script>
 {
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -564,9 +572,11 @@ const SAMPLE_CMTS={s0:[['saki','ここ行きたかったやつ！'],['kenta','�
 let dbp=null;
 function db(){if(dbp)return dbp;dbp=new Promise((res,rej)=>{try{const r=indexedDB.open('irodori',1);r.onupgradeneeded=()=>r.result.createObjectStore('posts',{keyPath:'id'});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}});return dbp}
 async function dbAll(){try{const d=await db();return await new Promise((res,rej)=>{const q=d.transaction('posts').objectStore('posts').getAll();q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error)})}catch{return []}}
-async function dbPut(p){try{const d=await db();await new Promise((res,rej)=>{const t=d.transaction('posts','readwrite');t.objectStore('posts').put(p);t.oncomplete=res;t.onerror=()=>rej(t.error)})}catch{}}
-async function dbDel(id){try{const d=await db();await new Promise((res)=>{const t=d.transaction('posts','readwrite');t.objectStore('posts').delete(id);t.oncomplete=res;t.onerror=res})}catch{}}
+async function dbPutRaw(p){try{const d=await db();await new Promise((res,rej)=>{const t=d.transaction('posts','readwrite');t.objectStore('posts').put(p);t.oncomplete=res;t.onerror=()=>rej(t.error)})}catch{}}
+async function dbDelRaw(id){try{const d=await db();await new Promise((res)=>{const t=d.transaction('posts','readwrite');t.objectStore('posts').delete(id);t.oncomplete=res;t.onerror=res})}catch{}}
 
+async function dbPut(p){if(!p.remote)await dbPutRaw(p);if(typeof cloudPush==='function')cloudPush(p)}
+async function dbDel(id){await dbDelRaw(id);if(typeof cloudDelete==='function')cloudDelete(id)}
 /* ---------- 状態 ---------- */
 let posts=[...SAMPLE];
 const S={mapApp:ls.get('mapApp',null),lang:ls.get('lang','ja'),themeSet:ls.get('theme','auto'),notif:ls.get('notif',{otd:true,near:true,fv:true,via:true}),meTab:'posts',pinCat:null,planTab:'wish',homePref:ls.get('homePref','40'),cat:'all',wcat:'all',defvis:ls.get('defvis','all'),scope:'mine',home:ls.get('home','jp'),myView:'grid',myid:ls.get('myid',null)||(()=>{const v=Math.random().toString(36).slice(2,10);ls.set('myid',v);return v})(),groups:ls.get('groups',[{id:'g1',name:'ゆうきと',members:['yuki']},{id:'g2',name:'九州ドライブ部',members:['yuki','kenta']}]),focus:null,follow:ls.get('follow',['yuki','saki','kenta']),q:'',sort:'new',here:ls.get('here',null),mode:ls.get('mode','pref'),likes:ls.get('likes',{}),cmts:ls.get('cmts',SAMPLE_CMTS),wish:ls.get('wish',[]),mapUser:'me',profUser:'me',view:'home',precision:ls.get('precision','muni'),avatar:ls.get('avatar',null),favs:ls.get('favs',[])};
@@ -578,6 +588,7 @@ const curLang=()=>LANGS.includes(S.lang)?S.lang:'ja';
 const LOC=()=>({ja:'ja-JP',en:'en-US',ko:'ko-KR',zh:'zh-CN'})[curLang()];
 const LI=()=>({en:0,ko:1,zh:2})[curLang()];
 const I18N_D=new Map(Object.entries({"タイムライン": ["Timeline", "타임라인", "动态"], "さがす": ["Search", "검색", "搜索"], "マップ": ["Map", "지도", "地图"], "トラベル": ["Travel", "여행", "旅行"], "マイページ": ["My page", "마이페이지", "我的"], "投稿": ["Post", "게시물", "发布"], "お知らせ": ["Notifications", "알림", "通知"], "設定": ["Settings", "설정", "设置"], "行きたいリスト": ["Want-to-go list", "가고 싶은 곳", "想去清单"], "思い出を投稿": ["Post a memory", "추억 올리기", "发布回忆"], "閉じる": ["Close", "닫기", "关闭"], "世界の白地図を広げています…": ["Unfolding the world map…", "세계 지도를 펼치는 중…", "正在展开世界地图…"], "地図データを読み込めませんでした": ["Couldn't load the map data", "지도 데이터를 불러오지 못했습니다", "无法加载地图数据"], "Hueday 試作": ["Hueday prototype", "Hueday 시제품", "Hueday 试用版"], "あなた": ["You", "나", "你"], "友達を追加": ["Add friends", "친구 추가", "添加好友"], "友達のアルバム": ["Friends' albums", "친구 앨범", "好友的相册"], "あの日の思い出": ["A memory from that day", "그날의 추억", "那天的回忆"], "近くの行きたい場所": ["Places to go nearby", "근처 가고 싶은 곳", "附近想去的地方"], "最初の1枚で地図に色をつけよう": ["Color your map with your first photo", "첫 사진으로 지도를 색칠해 보세요", "用第一张照片给地图上色吧"], "写真に位置情報があれば、その町が自動で塗られます。": ["If the photo has location data, that town is colored automatically.", "사진에 위치 정보가 있으면 그 지역이 자동으로 칠해집니다.", "照片带有位置信息时，该地区会自动上色。"], "写真・動画を投稿": ["Post photos/videos", "사진·동영상 올리기", "发布照片/视频"], "お試しの思い出を入れる": ["Add sample memories", "샘플 추억 넣기", "加入示例回忆"], "ここまでが友達と自分の思い出です": ["That's all the memories from you and your friends", "친구와 나의 추억은 여기까지입니다", "以上就是你和好友的回忆"], "友達の「ゆうき・さき・けんた」と投稿はお試し用のサンプルです。": ["The friends Yuki, Saki and Kenta and their posts are samples.", "친구 유키·사키·켄타와 게시물은 체험용 샘플입니다.", "好友Yuki、Saki、Kenta及其帖子为示例。"], "いいね": ["Like", "좋아요", "赞"], "コメント": ["Comment", "댓글", "评论"], "コメントする…": ["Add a comment…", "댓글 달기…", "写评论…"], "送信": ["Send", "보내기", "发送"], "行きたい": ["Want to go", "가고 싶어요", "想去"], "アルバムに追加": ["Add to album", "앨범에 추가", "加入相册"], "削除": ["Delete", "삭제", "删除"], "削除する": ["Delete", "삭제하기", "删除"], "やめる": ["Cancel", "취소", "取消"], "削除しました": ["Deleted", "삭제했습니다", "已删除"], "ここへ行く": ["Go here", "여기로 가기", "去这里"], "この宿を楽天トラベルで予約": ["Book this stay on Rakuten Travel", "라쿠텐 트래블에서 예약", "在乐天旅行预订"], "画像を読み込めませんでした": ["Couldn't load the image", "이미지를 불러오지 못했습니다", "无法加载图片"], "場所未設定": ["No location", "위치 미설정", "未设置地点"], "美味しかった": ["Delicious", "맛있었어요", "好吃"], "綺麗だった": ["Beautiful", "예뻤어요", "很美"], "楽しかった": ["Fun", "즐거웠어요", "很开心"], "また行きたい": ["Want to go again", "또 가고 싶어요", "还想再去"], "スポット": ["Spots", "명소", "景点"], "グルメ": ["Food", "맛집", "美食"], "イベント": ["Events", "이벤트", "活动"], "アクティブ": ["Active", "액티비티", "户外"], "ステイ": ["Stay", "숙박", "住宿"], "全て": ["All", "전체", "全部"], "種類": ["Type", "종류", "类型"], "友達みんな": ["All friends", "모든 친구", "所有好友"], "自分だけ": ["Only me", "나만", "仅自己"], "グループ": ["Group", "그룹", "群组"], "公開範囲": ["Visibility", "공개 범위", "可见范围"], "公開範囲：": ["Visible to:", "공개 범위:", "可见范围："], "（変える）": ["(change)", "(변경)", "（更改）"], "だれに見せる？": ["Who can see it?", "누구에게 보여줄까요?", "给谁看？"], "だれと共有する？": ["Share with whom?", "누구와 공유할까요?", "与谁分享？"], "アプリの中でだれに見せる？": ["Who can see it in the app?", "앱에서 누구에게 보여줄까요?", "在应用中给谁看？"], "写真・動画を選ぶ": ["Choose photos/videos", "사진·동영상 선택", "选择照片/视频"], "何枚でもOK。位置情報があれば自動で場所が入ります。過去の写真もまとめてどうぞ": ["Any number is fine. Location is filled in automatically if available. Old photos are welcome too.", "여러 장도 OK. 위치 정보가 있으면 자동으로 장소가 들어갑니다. 예전 사진도 한꺼번에 올려 보세요.", "可多选。带位置信息会自动填入地点，旧照片也可以一起上传。"], "まとめて投稿": ["Post all", "한꺼번에 올리기", "全部发布"], "読み込み中…": ["Loading…", "불러오는 중…", "加载中…"], "位置情報が見つかりません": ["No location data found", "위치 정보가 없습니다", "未找到位置信息"], "写真の位置情報から": ["From the photo's location", "사진 위치 정보에서", "来自照片位置"], "動画の位置情報から": ["From the video's location", "동영상 위치 정보에서", "来自视频位置"], "地図で選んだ場所": ["Picked on the map", "지도에서 선택한 장소", "在地图上选择的地点"], "設定した現在地から": ["From your set location", "설정한 현재 위치에서", "来自设置的当前位置"], "場所を直す": ["Fix location", "위치 수정", "修改地点"], "地図で場所を選ぶ": ["Pick on map", "지도에서 선택", "在地图上选择"], "外す": ["Remove", "빼기", "移除"], "お店・場所の名前（例：〇〇ラーメン）": ["Shop/place name (e.g. XX Ramen)", "가게·장소 이름 (예: ○○라멘)", "店铺/地点名称（例：XX拉面）"], "ひとこと（ここが良かった、など）": ["A short note (what was good, etc.)", "한마디 (좋았던 점 등)", "一句话（哪里好等）"], "近くの思い出から：": ["From nearby memories:", "근처 추억에서:", "来自附近的回忆："], "この場所のお店をGoogleマップで確認": ["Check shops here on Google Maps", "이 장소의 가게를 구글 지도에서 확인", "在谷歌地图查看此处店铺"], "思い出の場所をタップしてください": ["Tap the place of your memory", "추억의 장소를 탭하세요", "请点选回忆的地点"], "場所が決まっていない思い出があります": ["Some memories have no location yet", "위치가 정해지지 않은 추억이 있습니다", "有回忆尚未设置地点"], "投稿する写真を選んでください": ["Choose photos to post", "올릴 사진을 선택하세요", "请选择要发布的照片"], "自分": ["Me", "나", "我"], "＋ グループ": ["+ Group", "+ 그룹", "+ 群组"], "現在地": ["Here", "현재 위치", "当前位置"], "日本": ["Japan", "일본", "日本"], "世界": ["World", "세계", "世界"], "拡大": ["Zoom in", "확대", "放大"], "縮小": ["Zoom out", "축소", "缩小"], "今いる都道府県を表示": ["Show my prefecture", "현재 지역 보기", "显示当前都道府县"], "日本を表示": ["Show Japan", "일본 보기", "显示日本"], "世界を表示": ["Show world", "세계 보기", "显示世界"], "すべてのピンを表示しています": ["Showing all pins", "모든 핀을 표시 중", "显示全部图钉"], "編集": ["Edit", "편집", "编辑"], "都道府県": ["Prefectures", "도도부현", "都道府县"], "市町村": ["Municipalities", "시정촌", "市町村"], "塗る単位": ["Coloring unit", "색칠 단위", "上色单位"], "切り替え": ["Switch", "전환", "切换"], "今いる場所をタップしてください": ["Tap where you are now", "지금 있는 곳을 탭하세요", "请点选你现在的位置"], "追加したい場所をタップしてください": ["Tap the place to add", "추가할 장소를 탭하세요", "请点选要添加的地点"], "ここの思い出を投稿": ["Post a memory here", "여기 추억 올리기", "发布此处的回忆"], "自分の思い出": ["My memories", "나의 추억", "我的回忆"], "グループの思い出": ["Group memories", "그룹 추억", "群组回忆"], "まだ誰も投稿していない場所です。最初の1枚を撮ってみよう。": ["No one has posted here yet. Take the first photo!", "아직 아무도 올리지 않은 장소예요. 첫 사진을 찍어 보세요.", "这里还没人发布过，来拍第一张吧！"], "まだ誰も投稿していない国です。": ["No one has posted in this country yet.", "아직 아무도 올리지 않은 나라예요.", "这个国家还没人发布过。"], "思い出から探す（例：福岡 ラーメン）": ["Search memories (e.g. Fukuoka ramen)", "추억 검색 (예: 후쿠오카 라멘)", "搜索回忆（例：福冈 拉面）"], "消す": ["Clear", "지우기", "清除"], "検索": ["Search", "검색", "搜索"], "自分の写真": ["My photos", "내 사진", "我的照片"], "友達の写真も": ["Include friends", "친구 사진도", "包括好友"], "範囲": ["Scope", "범위", "范围"], "並び順": ["Sort", "정렬", "排序"], "新しい順": ["Newest", "최신순", "最新"], "近い順": ["Nearest", "가까운 순", "最近"], "設定する": ["Set", "설정", "设置"], "変える": ["Change", "변경", "更改"], "未設定": ["Not set", "미설정", "未设置"], "自分の写真と、友達が共有してくれた写真から探せます。「ここへ行く」でGoogleマップの道案内が開きます。": ["Search your photos and those friends shared. \"Go here\" opens directions in your map app.", "내 사진과 친구가 공유한 사진에서 찾을 수 있어요. '여기로 가기'로 길안내가 열립니다.", "可搜索自己和好友分享的照片，“去这里”会打开导航。"], "まだ思い出がありません": ["No memories yet", "아직 추억이 없습니다", "还没有回忆"], "写真を投稿すると、ここから場所を探してすぐ行けるようになります。": ["Once you post photos, you can find places here and go right away.", "사진을 올리면 여기서 장소를 찾아 바로 갈 수 있어요.", "发布照片后，就能在这里找到地点并马上出发。"], "見つかりませんでした": ["Nothing found", "찾지 못했습니다", "未找到"], "言葉を短くするか、地名だけで探してみてください。": ["Try shorter words or just a place name.", "더 짧은 단어나 지명만으로 찾아보세요.", "请尝试更短的词或只输入地名。"], "現在地を設定": ["Set current location", "현재 위치 설정", "设置当前位置"], "この画面では位置情報を直接取得できないため、地図で今いる場所をタップして設定してください。": ["Location can't be read directly here, so tap where you are on the map.", "이 화면에서는 위치를 직접 가져올 수 없어 지도에서 현재 위치를 탭해 설정해 주세요.", "此处无法直接获取位置，请在地图上点选当前位置。"], "地図でタップして設定": ["Set by tapping the map", "지도를 탭해서 설정", "在地图上点选设置"], "現在地を消す": ["Clear current location", "현재 위치 지우기", "清除当前位置"], "現在地を設定しました": ["Location set", "현재 위치를 설정했습니다", "已设置位置"], "現在地を設定しました。近い順に並べています": ["Location set. Sorted by distance", "현재 위치를 설정했습니다. 가까운 순으로 정렬합니다", "已设置位置，按距离排序"], "ラーメン": ["Ramen", "라멘", "拉面"], "夜景": ["Night view", "야경", "夜景"], "海": ["Sea", "바다", "海"], "神社": ["Shrine", "신사", "神社"], "海外": ["Overseas", "해외", "海外"], "旅のスタンプラリー": ["Trip stamp rally", "여행 스탬프 랠리", "旅行集章"], "行きたい場所を集めて旅のスタンプカードに。現地で写真を投稿すると、近く（500m以内）のスポットに自動でスタンプが押されます。": ["Collect places into a trip stamp card. Post a photo on site and nearby spots (within 500 m) get stamped automatically.", "가고 싶은 곳을 모아 여행 스탬프 카드로. 현지에서 사진을 올리면 500m 이내 장소에 자동으로 스탬프가 찍혀요.", "把想去的地方做成旅行集章卡。在当地发布照片，500米内的地点会自动盖章。"], "＋ 新しい旅を作る": ["+ New trip", "+ 새 여행 만들기", "+ 新建旅行"], "まずは行きたいリストや友達の投稿から、行きたい場所を選んでみましょう。": ["Start by picking places from your list or friends' posts.", "먼저 가고 싶은 곳 목록이나 친구 게시물에서 장소를 골라 보세요.", "先从想去清单或好友帖子里选地方吧。"], "お試しの旅を作る": ["Create a sample trip", "샘플 여행 만들기", "创建示例旅行"], "新しい旅": ["New trip", "새 여행", "新旅行"], "旅の名前（例：12月の長崎旅行）": ["Trip name (e.g. Nagasaki in December)", "여행 이름 (예: 12월 나가사키 여행)", "旅行名称（例：12月长崎之旅）"], "行き": ["From", "출발", "出发"], "帰り": ["To", "귀가", "返回"], "日程はあとからいつでも変えられます（未定なら空のままでOK）": ["You can change dates anytime (leave blank if undecided)", "일정은 언제든 바꿀 수 있어요 (미정이면 비워 두세요)", "日期随时可改（未定可留空）"], "保存": ["Save", "저장", "保存"], "場所はあとから、候補を探す画面で追加できます。": ["You can add places later on the planning screen.", "장소는 나중에 후보 찾기 화면에서 추가할 수 있어요.", "地点可稍后在规划页面添加。"], "計画中": ["Planning", "계획 중", "计划中"], "旅行中": ["On trip", "여행 중", "旅行中"], "行きたい場所を探す（例：長崎 ちゃんぽん）": ["Find places (e.g. Nagasaki champon)", "가고 싶은 곳 찾기 (예: 나가사키 짬뽕)", "搜索想去的地方（例：长崎 什锦面）"], "おすすめ（行きたいリスト・友達）": ["Suggestions (list & friends)", "추천 (가고 싶은 곳·친구)", "推荐（想去清单·好友）"], "アプリ内の思い出から": ["From memories in the app", "앱 안의 추억에서", "来自应用内的回忆"], "アプリ内には見つかりませんでした。下のGoogleマップで探してください。": ["Nothing in the app. Try searching Google Maps below.", "앱에서 찾지 못했어요. 아래 구글 지도에서 찾아보세요.", "应用内未找到，请在下方谷歌地图中搜索。"], "候補に追加": ["Add as candidate", "후보에 추가", "添加为候选"], "追加済": ["Added", "추가됨", "已添加"], "Googleマップで探す": ["Find on Google Maps", "구글 지도에서 찾기", "在谷歌地图中搜索"], "見つけた場所の「共有」→「リンクをコピー」で、ここに貼り付けて＋で追加できます。": ["Tap Share → Copy link on the place, paste it here and press + to add.", "찾은 장소에서 '공유' → '링크 복사' 후 여기에 붙여넣고 +를 누르세요.", "在地点上点“分享”→“复制链接”，粘贴到这里再按+添加。"], "Googleマップのリンクを貼り付け": ["Paste a Google Maps link", "구글 지도 링크 붙여넣기", "粘贴谷歌地图链接"], "リンクの場所を候補に追加": ["Add linked place", "링크 장소를 후보에 추가", "添加链接地点"], "地図をタップして追加": ["Add by tapping the map", "지도를 탭해서 추가", "点地图添加"], "候補地": ["Candidates", "후보지", "候选地"], "まだ候補はありません。上で探して「＋」を押すと、ここに並びます。": ["No candidates yet. Search above and press + to add them here.", "아직 후보가 없어요. 위에서 찾아 +를 누르면 여기에 표시돼요.", "还没有候选。在上方搜索并按+，就会列在这里。"], "候補から外す": ["Remove candidate", "후보에서 빼기", "移出候选"], "地図": ["Map", "지도", "地图"], "共有する": ["Share", "공유하기", "分享"], "旅を削除": ["Delete trip", "여행 삭제", "删除旅行"], "旅を終える": ["End trip", "여행 끝내기", "结束旅行"], "スポットを追加": ["Add spots", "장소 추가", "添加地点"], "アルバムを更新": ["Update album", "앨범 업데이트", "更新相册"], "まだの場所をGoogleマップで回る": ["Visit remaining places in Google Maps", "남은 장소를 구글 지도로 돌기", "用谷歌地图走完剩余地点"], "まだの場所をAppleマップで回る": ["Visit remaining places in Apple Maps", "남은 장소를 애플 지도로 돌기", "用苹果地图走完剩余地点"], "まだの場所をNAVER Mapで回る": ["Visit remaining places in NAVER Map", "남은 장소를 네이버 지도로 돌기", "用NAVER地图走完剩余地点"], "スタンプ": ["Stamp", "스탬프", "盖章"], "＋写真": ["+Photo", "+사진", "+照片"], "済": ["Done", "완료", "完成"], "番号の丸を押すと、その場所の写真を追加できます。追加した写真は思い出としても投稿されます。": ["Tap a numbered circle to add a photo for that place. It's also posted as a memory.", "번호 동그라미를 누르면 그 장소 사진을 추가할 수 있어요. 추가한 사진은 추억으로도 올라가요.", "点编号圆圈可为该地点添加照片，照片也会作为回忆发布。"], "最大10か所までの道案内を作ります。": ["Creates directions for up to 10 places.", "최대 10곳까지 길안내를 만들어요.", "最多为10个地点生成导航。"], "いってらっしゃい！現地で写真を撮るとスタンプが押されます": ["Have a great trip! Taking photos on site adds stamps", "잘 다녀오세요! 현지에서 사진을 찍으면 스탬프가 찍혀요", "一路顺风！在当地拍照就会盖章"], "おかえりなさい！旅の記録として残しました": ["Welcome back! Saved as a trip record", "어서 오세요! 여행 기록으로 남겼어요", "欢迎回来！已保存为旅行记录"], "候補地を1か所以上追加してください": ["Add at least one candidate", "후보지를 한 곳 이상 추가하세요", "请至少添加一个候选地"], "候補に追加しました": ["Added as candidate", "후보에 추가했습니다", "已添加为候选"], "スタンプを押しました": ["Stamped", "스탬프를 찍었습니다", "已盖章"], "全部集まりました！おめでとう": ["All collected! Congrats", "모두 모았어요! 축하해요", "全部集齐！恭喜"], "全部の場所の写真がそろいました！": ["Photos for every place are in!", "모든 장소의 사진이 모였어요!", "所有地点的照片都齐了！"], "まだ写真がありません。番号の丸を押して写真を追加してください": ["No photos yet. Tap a numbered circle to add one", "아직 사진이 없어요. 번호 동그라미를 눌러 추가하세요", "还没有照片，请点编号圆圈添加"], "旅を共有": ["Share trip", "여행 공유", "分享旅行"], "LINEで旅のしおりを送る": ["Send the trip via LINE", "LINE으로 여행 일정 보내기", "通过LINE发送行程"], "試作版では、送った相手のアプリにはまだ中身が届きません。": ["In this prototype, the content doesn't reach the recipient's app yet.", "시제품에서는 받는 사람 앱에 아직 내용이 전달되지 않아요.", "试用版中内容尚不会送达对方应用。"], "旅を削除しました（思い出の投稿は消えません）": ["Trip deleted (memory posts remain)", "여행을 삭제했어요 (추억 게시물은 남아요)", "已删除旅行（回忆帖子保留）"], "追加する": ["Add", "추가하기", "添加"], "場所の名前（例：〇〇水族館）": ["Place name (e.g. XX Aquarium)", "장소 이름 (예: ○○ 수족관)", "地点名称（例：XX水族馆）"], "地図はおおまかな位置です。正確な場所は名前で探すと確実です。": ["The map position is approximate; searching by name is more precise.", "지도는 대략적인 위치예요. 정확한 장소는 이름으로 찾는 게 확실해요.", "地图位置为大致位置，按名称搜索更准确。"], "選んだ場所": ["Selected place", "선택한 장소", "所选地点"], "Googleマップの場所": ["Google Maps place", "구글 지도 장소", "谷歌地图地点"], "Googleマップのリンクを貼り付けてください": ["Paste a Google Maps link", "구글 지도 링크를 붙여넣으세요", "请粘贴谷歌地图链接"], "短いリンク（maps.app.goo.gl）からは場所を読み取れません。「地図をタップして追加」を使ってください": ["Short links (maps.app.goo.gl) can't be read. Use \"Add by tapping the map\"", "짧은 링크(maps.app.goo.gl)는 읽을 수 없어요. '지도를 탭해서 추가'를 이용하세요", "无法读取短链接（maps.app.goo.gl），请使用“点地图添加”"], "自分の思い出（もう一度行く）": ["My memories (go again)", "나의 추억 (다시 가기)", "我的回忆（再去一次）"], "友達の投稿": ["Friends' posts", "친구 게시물", "好友的帖子"], "友達の投稿で「行きたい」を押した場所。そこで投稿すると友達に「おすすめで来たよ」が届きます。": ["Places you marked \"Want to go\". Post there and your friend gets a \"came on your tip\" note.", "친구 게시물에서 '가고 싶어요'를 누른 곳. 그곳에서 올리면 친구에게 '추천 보고 왔어요'가 전해져요.", "在好友帖子上点了“想去”的地方。在那里发布，好友会收到“看了推荐来的”。"], "まだありません": ["Nothing yet", "아직 없습니다", "还没有"], "ホームで友達の投稿の右下にあるしおりを押すと、ここに集まります。": ["Tap the bookmark on a friend's post to collect it here.", "친구 게시물의 책갈피를 누르면 여기에 모여요.", "点好友帖子右下的书签，就会收集到这里。"], "行った": ["Been", "다녀옴", "去过"], "行きたいリストに追加しました": ["Added to want-to-go list", "가고 싶은 곳에 추가했어요", "已加入想去清单"], "行きたいリストから外しました": ["Removed from want-to-go list", "가고 싶은 곳에서 뺐어요", "已移出想去清单"], "名前を変える": ["Rename", "이름 변경", "改名"], "投稿する": ["Post", "올리기", "发布"], "マイマップ": ["My map", "마이 맵", "我的地图"], "アルバム": ["Albums", "앨범", "相册"], "新しいアルバム": ["New album", "새 앨범", "新相册"], "グルメマップなど": ["e.g. a food map", "맛집 지도 등", "例如美食地图"], "自分の投稿": ["My posts", "내 게시물", "我的帖子"], "一覧": ["Grid", "목록", "列表"], "時系列": ["Timeline", "시간순", "时间线"], "場所別": ["By place", "장소별", "按地点"], "まだ投稿がありません": ["No posts yet", "아직 게시물이 없습니다", "还没有帖子"], "写真か動画を投稿すると、ここに並びます。": ["Post photos or videos and they'll appear here.", "사진이나 동영상을 올리면 여기에 표시돼요.", "发布照片或视频后会显示在这里。"], "塗った場所が、そのまま思い出のアルバムになる。": ["The places you color become your memory album.", "칠한 장소가 그대로 추억 앨범이 돼요.", "上色的地方就是你的回忆相册。"], "国": ["Countries", "국가", "国家"], "海外の写真を投稿すると、ここに国が並びます": ["Post photos from abroad and countries appear here", "해외 사진을 올리면 여기에 나라가 표시돼요", "发布海外照片后，国家会列在这里"], "日本以外": ["Outside Japan", "일본 외", "日本以外"], "フォロー中": ["Following", "팔로잉", "已关注"], "フォローする": ["Follow", "팔로우", "关注"], "グループを作る": ["Create group", "그룹 만들기", "创建群组"], "一緒のグループ：": ["Shared groups:", "함께하는 그룹:", "共同群组："], "個人の地図は本人だけが見られます。共有マップはグループを作ると見られます。": ["Personal maps are private. Create a group to see a shared map.", "개인 지도는 본인만 볼 수 있어요. 그룹을 만들면 공유 지도를 볼 수 있어요.", "个人地图仅本人可见，创建群组后可查看共享地图。"], "アルバム名（例：福岡ラーメンマップ）": ["Album name (e.g. Fukuoka ramen map)", "앨범 이름 (예: 후쿠오카 라멘 지도)", "相册名称（例：福冈拉面地图）"], "自分の写真から自動で集める（任意）": ["Auto-collect from my photos (optional)", "내 사진에서 자동으로 모으기 (선택)", "从我的照片自动收集（可选）"], "選ばない": ["None", "선택 안 함", "不选"], "全地域": ["All areas", "전체 지역", "全部地区"], "作る": ["Create", "만들기", "创建"], "自分のアルバムに保存": ["Save to my albums", "내 앨범에 저장", "保存到我的相册"], "自分のアルバムに保存しました（自分だけ）": ["Saved to my albums (only me)", "내 앨범에 저장했어요 (나만)", "已保存到我的相册（仅自己）"], "まだ空です": ["Empty", "비어 있음", "空"], "投稿の下にあるアルバムのボタンから追加できます。": ["Add from the album button under each post.", "게시물 아래 앨범 버튼으로 추가할 수 있어요.", "可通过帖子下方的相册按钮添加。"], "まだ見られるアルバムはありません": ["No albums to show yet", "아직 볼 수 있는 앨범이 없어요", "还没有可查看的相册"], "アルバムを共有": ["Share album", "앨범 공유", "分享相册"], "LINEでアルバムを送る": ["Send album via LINE", "LINE으로 앨범 보내기", "通过LINE发送相册"], "試作版の注意：データは各自の端末に保存されるため、送った相手のアプリにはまだアルバムの中身が届きません。": ["Prototype note: data stays on each device, so the album doesn't reach the recipient's app yet.", "시제품 안내: 데이터가 각자 기기에 저장되어 받는 사람 앱에 아직 앨범이 전달되지 않아요.", "试用版提示：数据保存在各自设备上，相册内容暂不会送达对方应用。"], "アルバムを編集": ["Edit album", "앨범 편집", "编辑相册"], "名前を保存": ["Save name", "이름 저장", "保存名称"], "このアルバムを削除": ["Delete this album", "이 앨범 삭제", "删除此相册"], "削除しても、中の写真（投稿）は消えません。": ["Deleting won't remove the photos (posts).", "삭제해도 안의 사진(게시물)은 지워지지 않아요.", "删除后照片（帖子）不会消失。"], "アルバムを削除しました": ["Album deleted", "앨범을 삭제했어요", "已删除相册"], "＋ 新しいアルバムを作って追加": ["+ Create a new album and add", "+ 새 앨범 만들어 추가", "+ 新建相册并添加"], "自動": ["Auto", "자동", "自动"], "グルメマップ": ["Food map", "맛집 지도", "美食地图"], "グループを編集": ["Edit group", "그룹 편집", "编辑群组"], "グループ名（例：九州ドライブ部）": ["Group name (e.g. Kyushu drive club)", "그룹 이름 (예: 규슈 드라이브부)", "群组名称（例：九州自驾团）"], "メンバーを選ぶ（1人だけでもOK）。フォロー中の人から選べます。": ["Choose members (one is fine). Pick from people you follow.", "멤버 선택 (한 명도 OK). 팔로우 중인 사람 중에서 고를 수 있어요.", "选择成员（一人也可），从已关注的人中选择。"], "まだ誰もフォローしていません。": ["You don't follow anyone yet.", "아직 아무도 팔로우하지 않았어요.", "还没有关注任何人。"], "作って共有マップを見る": ["Create and view shared map", "만들고 공유 지도 보기", "创建并查看共享地图"], "このグループを削除": ["Delete this group", "이 그룹 삭제", "删除此群组"], "リストにいない友達をLINEで招待": ["Invite other friends via LINE", "목록에 없는 친구를 LINE으로 초대", "通过LINE邀请其他好友"], "メンバーを1人以上選んでください": ["Choose at least one member", "멤버를 한 명 이상 선택하세요", "请至少选择一名成员"], "グループを作りました。メンバーの思い出が1枚の地図に集まります": ["Group created. Members' memories come together on one map", "그룹을 만들었어요. 멤버의 추억이 한 지도에 모여요", "已创建群组，成员的回忆汇集在一张地图上"], "グループを更新しました": ["Group updated", "그룹을 업데이트했어요", "已更新群组"], "グループを削除しました": ["Group deleted", "그룹을 삭제했어요", "已删除群组"], "LINEで招待リンクを送る": ["Send invite link via LINE", "LINE으로 초대 링크 보내기", "通过LINE发送邀请链接"], "招待リンクをLINEで送って、相手が開いて「友達になる」を押すと追加されます。": ["Send the invite link on LINE; when they open it and tap \"Be friends\", you're connected.", "LINE으로 초대 링크를 보내고, 상대가 열어 '친구 되기'를 누르면 추가돼요.", "通过LINE发送邀请链接，对方打开并点“成为好友”即可添加。"], "コピー": ["Copy", "복사", "复制"], "試作版の注意：相手がこのリンクを開くには、このページを共有設定にしておく必要があります。また、データは各自の端末に保存されるため、相手の投稿はまだ届きません。": ["Prototype note: this page must be shared for them to open the link, and since data stays on each device, their posts won't reach you yet.", "시제품 안내: 상대가 링크를 열려면 이 페이지를 공유 설정해야 해요. 데이터가 각 기기에 저장되므로 상대 게시물은 아직 오지 않아요.", "试用版提示：需将此页面设为共享对方才能打开链接；数据保存在各自设备上，对方的帖子暂不会送达。"], "招待が届きました": ["You've got an invite", "초대가 도착했어요", "收到邀请"], "友達になる": ["Be friends", "친구 되기", "成为好友"], "すでに友達です。": ["You're already friends.", "이미 친구예요.", "已经是好友了。"], "これはあなた自身の招待リンクです。友達が開くと、この画面が表示されます。": ["This is your own invite link. Friends will see this screen when they open it.", "내 초대 링크예요. 친구가 열면 이 화면이 표시돼요.", "这是你自己的邀请链接，好友打开时会看到此画面。"], "友達になりました": ["You're now friends", "친구가 되었어요", "已成为好友"], "あとで": ["Later", "나중에", "稍后"], "LINEの招待リンクで友達になりました": ["Became friends via a LINE invite", "LINE 초대 링크로 친구가 되었어요", "通过LINE邀请链接成为好友"], "リンクをコピーしました。LINEのトークに貼り付けて送ってください": ["Link copied. Paste it into a LINE chat", "링크를 복사했어요. LINE 채팅에 붙여넣어 보내세요", "已复制链接，请粘贴到LINE聊天中发送"], "コピーできませんでした。リンクを長押ししてコピーしてください": ["Couldn't copy. Long-press the link to copy it", "복사하지 못했어요. 링크를 길게 눌러 복사하세요", "无法复制，请长按链接复制"], "新しいお知らせはありません": ["No new notifications", "새 알림이 없습니다", "没有新通知"], "1年前の思い出や、近くの行きたい場所、友達の動きをここでお知らせします。": ["Memories from a year ago, nearby places to go and friends' activity will show up here.", "1년 전 추억, 근처 가고 싶은 곳, 친구 소식을 여기서 알려 드려요.", "一年前的回忆、附近想去的地方和好友动态会在这里通知。"], "アプリ版では、これらをスマホの通知でお知らせします。": ["In the app, these arrive as phone notifications.", "앱 버전에서는 휴대폰 알림으로 알려 드려요.", "正式应用中会以手机通知提醒。"], "思い出": ["Memory", "추억", "回忆"], "友達": ["Friends", "친구", "好友"], "プロフィール": ["Profile", "프로필", "个人资料"], "名前": ["Name", "이름", "名字"], "ひとこと": ["Bio", "한마디", "简介"], "例：旅とラーメンが好き": ["e.g. I love travel and ramen", "예: 여행과 라멘을 좋아해요", "例：喜欢旅行和拉面"], "開く地図アプリ": ["Map app to open", "열 지도 앱", "打开的地图应用"], "「ここへ行く」「〜で見る」で使います": ["Used for \"Go here\" and \"View in…\"", "'여기로 가기', '~에서 보기'에 사용", "用于“去这里”和“在…查看”"], "マイマップの塗る単位": ["My map coloring unit", "마이 맵 색칠 단위", "我的地图上色单位"], "地図の最初の場所": ["Map start area", "지도 시작 위치", "地图初始位置"], "現在地が分からないとき": ["When location is unknown", "현재 위치를 모를 때", "无法获取位置时"], "住んでいる国": ["Home country", "거주 국가", "居住国家"], "公開とプライバシー": ["Sharing & privacy", "공개 및 개인정보", "公开与隐私"], "投稿の公開範囲（最初の選択）": ["Default post visibility", "게시물 기본 공개 범위", "帖子默认可见范围"], "友達に見せる位置の細かさ": ["Location detail shown to friends", "친구에게 보여줄 위치 정밀도", "向好友显示的位置精度"], "市町村まで": ["Municipality", "시정촌까지", "到市町村"], "都道府県まで": ["Prefecture", "도도부현까지", "到都道府县"], "国まで": ["Country", "국가까지", "到国家"], "1年前の今日の思い出": ["Memories from a year ago today", "1년 전 오늘의 추억", "一年前的今天"], "友達が同じ場所に行ったとき": ["When a friend visits the same place", "친구가 같은 장소에 갔을 때", "好友去了相同地点时"], "友達があなたのおすすめで行ったとき": ["When a friend goes on your tip", "친구가 내 추천으로 갔을 때", "好友因你的推荐前往时"], "表示": ["Display", "표시", "显示"], "言語 / Language": ["Language / 言語", "언어 / Language", "语言 / Language"], "テーマ": ["Theme", "테마", "主题"], "端末に合わせる": ["Match device", "기기 설정 따르기", "跟随设备"], "ライト": ["Light", "라이트", "浅色"], "ダーク": ["Dark", "다크", "深色"], "データ": ["Data", "데이터", "数据"], "お試しの思い出を消す": ["Delete sample memories", "샘플 추억 지우기", "删除示例回忆"], "すべてのデータを消す": ["Delete all data", "모든 데이터 지우기", "删除所有数据"], "本当に消す場合はもう一度押してください": ["Press again to really delete", "정말 지우려면 한 번 더 누르세요", "确认删除请再按一次"], "Hueday 試作版 0.1 · データはこの端末の中だけに保存されています。": ["Hueday prototype 0.1 · Data is stored only on this device.", "Hueday 시제품 0.1 · 데이터는 이 기기에만 저장돼요.", "Hueday 试用版 0.1 · 数据仅保存在本设备中。"], "お試しの思い出はありません": ["No sample memories", "샘플 추억이 없어요", "没有示例回忆"], "プロフィールを保存しました": ["Profile saved", "프로필을 저장했어요", "已保存个人资料"], "お知らせの設定を保存しました": ["Notification settings saved", "알림 설정을 저장했어요", "已保存通知设置"], "テーマを変えました": ["Theme changed", "테마를 바꿨어요", "已更改主题"], "位置の細かさを変えました": ["Location detail changed", "위치 정밀도를 바꿨어요", "已更改位置精度"], "住んでいる国を変えました": ["Home country changed", "거주 국가를 바꿨어요", "已更改居住国家"], "日本語": ["日本語", "日本語", "日本語"], "日本語にしました": ["Switched to Japanese", "일본어로 바꿨어요", "已切换为日语"], "撮影モード": ["Camera mode", "촬영 모드", "拍摄模式"], "撮った写真は、そのまま思い出として投稿できます": ["Photos you take can be posted as memories right away", "찍은 사진을 바로 추억으로 올릴 수 있어요", "拍的照片可直接作为回忆发布"], "カメラで撮る": ["Take a photo", "카메라로 찍기", "拍照"], "写真ライブラリから選ぶ": ["Choose from library", "사진 보관함에서 선택", "从相册选择"], "縦に戻すと閉じます": ["Turn upright to close", "세로로 돌리면 닫혀요", "竖屏即可关闭"], "写真を読み込んでいます…": ["Loading photo…", "사진을 불러오는 중…", "正在加载照片…"], "お試しの思い出を9件入れました（あとで削除できます）": ["Added 9 sample memories (you can delete them later)", "샘플 추억 9개를 넣었어요 (나중에 지울 수 있어요)", "已加入9条示例回忆（可稍后删除）"], "中文（简体）": ["中文（简体）", "中文（简体）", "中文（简体）"], "Googleマップ": ["Google Maps", "구글 지도", "谷歌地图"], "Appleマップ": ["Apple Maps", "애플 지도", "苹果地图"], "Googleマップで順番に回る": ["Visit in order on Google Maps", "구글 지도로 순서대로 돌기", "用谷歌地图依次游览"], "Googleマップで行く": ["Go with Google Maps", "구글 지도로 가기", "用谷歌地图前往"], "Googleマップで開く": ["Open in Google Maps", "구글 지도에서 열기", "在谷歌地图中打开"], "この旅をアルバムにする": ["Make this trip an album", "이 여행을 앨범으로", "把这次旅行做成相册"], "フォロー": ["Follow", "팔로우", "关注"], "フォローを外しました": ["Unfollowed", "언팔로우했어요", "已取消关注"], "みんな": ["Everyone", "모두", "大家"], "友達を招待": ["Invite friends", "친구 초대", "邀请好友"], "Yahoo!マップ": ["Yahoo! Map", "야후! 맵", "雅虎地图"], "NAVER Map": ["NAVER Map", "네이버 지도", "NAVER地图"], "KakaoMap": ["KakaoMap", "카카오맵", "KakaoMap"], "Waze": ["Waze", "Waze", "Waze"], "高德地图": ["Amap (高德地图)", "가오더 지도", "高德地图"], "百度地图": ["Baidu Maps (百度地图)", "바이두 지도", "百度地图"], "言語を変更しました": ["Language changed to English", "언어를 한국어로 바꿨어요", "已切换为简体中文"], "未定": ["TBD", "미정", "未定"], "中国": ["Chugoku", "주고쿠", "中国地区"], "自分のアルバム": ["My album", "내 앨범", "我的相册"], "詳しく": ["More", "자세히", "详情"], "場所未確定": ["Location TBD", "위치 미정", "地点未定"], "Hueday": ["Hueday", "Hueday", "Hueday"], "中国・韓国では各国の地図アプリが便利です": ["Local map apps work best in China and Korea", "중국·한국에서는 현지 지도 앱이 편리해요", "在中国、韩国使用当地地图应用更方便"], "東北": ["Tohoku", "도호쿠", "东北"], "関東": ["Kanto", "간토", "关东"], "中部": ["Chubu", "주부", "中部"], "近畿": ["Kinki", "긴키", "近畿"], "四国": ["Shikoku", "시코쿠", "四国"], "九州沖縄": ["Kyushu & Okinawa", "규슈·오키나와", "九州冲绳"], "アジア": ["Asia", "아시아", "亚洲"], "ヨーロッパ": ["Europe", "유럽", "欧洲"], "アフリカ": ["Africa", "아프리카", "非洲"], "北アメリカ": ["North America", "북아메리카", "北美洲"], "南アメリカ": ["South America", "남아메리카", "南美洲"], "オセアニア": ["Oceania", "오세아니아", "大洋洲"], "北海道": ["Hokkaido", "홋카이도", "北海道"], "青森県": ["Aomori", "아오모리현", "青森县"], "岩手県": ["Iwate", "이와테현", "岩手县"], "宮城県": ["Miyagi", "미야기현", "宫城县"], "秋田県": ["Akita", "아키타현", "秋田县"], "山形県": ["Yamagata", "야마가타현", "山形县"], "福島県": ["Fukushima", "후쿠시마현", "福岛县"], "茨城県": ["Ibaraki", "이바라키현", "茨城县"], "栃木県": ["Tochigi", "도치기현", "栃木县"], "群馬県": ["Gunma", "군마현", "群马县"], "埼玉県": ["Saitama", "사이타마현", "埼玉县"], "千葉県": ["Chiba", "지바현", "千叶县"], "東京都": ["Tokyo", "도쿄도", "东京都"], "神奈川県": ["Kanagawa", "가나가와현", "神奈川县"], "新潟県": ["Niigata", "니가타현", "新潟县"], "富山県": ["Toyama", "도야마현", "富山县"], "石川県": ["Ishikawa", "이시카와현", "石川县"], "福井県": ["Fukui", "후쿠이현", "福井县"], "山梨県": ["Yamanashi", "야마나시현", "山梨县"], "長野県": ["Nagano", "나가노현", "长野县"], "岐阜県": ["Gifu", "기후현", "岐阜县"], "静岡県": ["Shizuoka", "시즈오카현", "静冈县"], "愛知県": ["Aichi", "아이치현", "爱知县"], "三重県": ["Mie", "미에현", "三重县"], "滋賀県": ["Shiga", "시가현", "滋贺县"], "京都府": ["Kyoto", "교토부", "京都府"], "大阪府": ["Osaka", "오사카부", "大阪府"], "兵庫県": ["Hyogo", "효고현", "兵库县"], "奈良県": ["Nara", "나라현", "奈良县"], "和歌山県": ["Wakayama", "와카야마현", "和歌山县"], "鳥取県": ["Tottori", "돗토리현", "鸟取县"], "島根県": ["Shimane", "시마네현", "岛根县"], "岡山県": ["Okayama", "오카야마현", "冈山县"], "広島県": ["Hiroshima", "히로시마현", "广岛县"], "山口県": ["Yamaguchi", "야마구치현", "山口县"], "徳島県": ["Tokushima", "도쿠시마현", "德岛县"], "香川県": ["Kagawa", "가가와현", "香川县"], "愛媛県": ["Ehime", "에히메현", "爱媛县"], "高知県": ["Kochi", "고치현", "高知县"], "福岡県": ["Fukuoka", "후쿠오카현", "福冈县"], "佐賀県": ["Saga", "사가현", "佐贺县"], "長崎県": ["Nagasaki", "나가사키현", "长崎县"], "熊本県": ["Kumamoto", "구마모토현", "熊本县"], "大分県": ["Oita", "오이타현", "大分县"], "宮崎県": ["Miyazaki", "미야자키현", "宫崎县"], "鹿児島県": ["Kagoshima", "가고시마현", "鹿儿岛县"], "沖縄県": ["Okinawa", "오키나와현", "冲绳县"]}));
+[["Huedayへようこそ", "Welcome to Hueday", "Hueday에 오신 것을 환영해요", "欢迎来到Hueday"], ["友だちに表示される名前を決めてください。", "Choose the name your friends will see.", "친구에게 보일 이름을 정해 주세요.", "请设置好友看到的名字。"], ["はじめる", "Get started", "시작하기", "开始"], ["ホーム画面に追加したアプリから使うと、データが消えにくくなります。", "Using it from your Home Screen keeps your data safer.", "홈 화면에 추가해서 쓰면 데이터가 잘 지워지지 않아요.", "从主屏幕打开使用，数据更不容易丢失。"], ["保存できませんでした。通信を確認してもう一度お試しください", "Couldn't save. Check your connection and try again", "저장하지 못했어요. 통신을 확인하고 다시 시도해 주세요", "无法保存。请检查网络后重试"], ["アカウントを削除", "Delete account", "계정 삭제", "删除账号"], ["投稿・写真・友達がすべて消えます。もう一度押すと削除します", "All posts, photos and friends will be deleted. Tap again to delete", "게시물·사진·친구가 모두 삭제돼요. 한 번 더 누르면 삭제해요", "所有帖子、照片和好友都会被删除。再按一次即删除"], ["削除しています…", "Deleting…", "삭제하는 중…", "正在删除…"], ["削除できませんでした。もう一度お試しください", "Couldn't delete. Please try again", "삭제하지 못했어요. 다시 시도해 주세요", "无法删除，请重试"], ["招待コードで追加", "Add with an invite code", "초대 코드로 추가", "用邀请码添加"], ["あなたのコード：", "Your code: ", "내 코드: ", "你的邀请码："], ["友達のコードを入力", "Enter a friend's code", "친구 코드 입력", "输入好友的邀请码"], ["追加", "Add", "추가", "添加"], ["友達", "Friends", "친구", "好友"], ["友達ではありません", "Not friends", "친구가 아니에요", "不是好友"], ["もう一度押すと友達をやめます", "Tap again to unfriend", "한 번 더 누르면 친구를 끊어요", "再按一次即解除好友"], ["友達をやめました", "Unfriended", "친구를 끊었어요", "已解除好友"], ["友達になるには、招待リンクを送ってください", "To become friends, send an invite link", "친구가 되려면 초대 링크를 보내 주세요", "要成为好友，请发送邀请链接"], ["サーバーにつながらないため、この端末の中だけで動いています", "Can't reach the server, so Hueday is running on this device only", "서버에 연결할 수 없어 이 기기에서만 작동하고 있어요", "无法连接服务器，目前仅在本设备上运行"], ["グループを編集できるのは作った人だけです", "Only the group's creator can edit it", "그룹은 만든 사람만 편집할 수 있어요", "只有创建者可以编辑群组"], ["グループを保存できませんでした", "Couldn't save the group", "그룹을 저장하지 못했어요", "无法保存群组"], ["グループを消せませんでした", "Couldn't delete the group", "그룹을 삭제하지 못했어요", "无法删除群组"], ["コメントを送れませんでした", "Couldn't send the comment", "댓글을 보내지 못했어요", "无法发送评论"], ["アップロードが終わってからコメントできます", "You can comment once the upload finishes", "업로드가 끝나면 댓글을 달 수 있어요", "上传完成后即可评论"], ["サーバーから消せませんでした。通信を確認してください", "Couldn't delete from the server. Check your connection", "서버에서 삭제하지 못했어요. 통신을 확인해 주세요", "无法从服务器删除，请检查网络"], ["プロフィールをサーバーに保存できませんでした", "Couldn't save your profile to the server", "프로필을 서버에 저장하지 못했어요", "无法将个人资料保存到服务器"], ["アイコンをサーバーに保存できませんでした", "Couldn't save your icon to the server", "아이콘을 서버에 저장하지 못했어요", "无法将头像保存到服务器"], ["招待リンクが見つかりませんでした", "Invite link not found", "초대 링크를 찾을 수 없어요", "找不到邀请链接"], ["サーバーにつながっていないため、招待を受け取れませんでした", "Not connected to the server, so the invite couldn't be received", "서버에 연결되어 있지 않아 초대를 받을 수 없었어요", "未连接服务器，无法接受邀请"], ["友達になれませんでした。通信を確認してください", "Couldn't add the friend. Check your connection", "친구가 되지 못했어요. 통신을 확인해 주세요", "无法添加好友，请检查网络"], ["コードを確認してください", "Please check the code", "코드를 확인해 주세요", "请检查邀请码"], ["友達になると、おたがいの投稿がホームに届き、一緒にグループの共有マップを作れます。", "As friends, you'll see each other's posts at home and can make shared group maps together.", "친구가 되면 서로의 게시물이 홈에 오고, 함께 그룹 공유 지도를 만들 수 있어요.", "成为好友后，彼此的帖子会出现在首页，还能一起制作群组共享地图。"], ["うまくいきませんでした", "Something went wrong", "잘 되지 않았어요", "操作失败"], ["Hueday 試作版 0.2 · 投稿はサーバーに保存され、公開範囲で選んだ人にだけ見えます。", "Hueday prototype 0.2 · Posts are saved on the server and only visible to the audience you choose.", "Hueday 시제품 0.2 · 게시물은 서버에 저장되며 공개 범위로 고른 사람에게만 보여요.", "Hueday 试用版 0.2 · 帖子保存在服务器上，仅对你选择的人可见。"], ["名前（例：ゆうき）","Name (e.g. Yuki)","이름 (예: 유키)","名字（例：小雪）"],["あなたの招待コード：", "Your invite code: ", "내 초대 코드: ", "你的邀请码："], ["Hueday（ヒューデイ）で一緒に思い出の地図を作ろう！", "Let's make a memory map together on Hueday!", "Hueday에서 함께 추억 지도를 만들어요!", "一起在Hueday制作回忆地图吧！"]].forEach(r=>I18N_D.set(r[0],r.slice(1)));
 [["© OpenStreetMap contributors・国土数値情報（国土交通省）", "© OpenStreetMap contributors · MLIT Japan", "© OpenStreetMap contributors · 일본 국토교통성", "© OpenStreetMap contributors・日本国土交通省"]].forEach(r=>I18N_D.set(r[0],r.slice(1)));
 [["鉄道：国土数値情報（国土交通省）を加工", "Railways: based on MLIT National Land Numerical Information", "철도: 국토교통성 국토수치정보 가공", "铁路：基于日本国土交通省国土数值信息加工"]].forEach(r=>I18N_D.set(r[0],r.slice(1)));
 [["はじめの1枚", "First shot", "첫 한 장", "第一张"], ["思い出を1つ投稿する", "Post your first memory", "추억을 하나 올리기", "发布第一条回忆"], ["5都道府県", "5 prefectures", "5개 도도부현", "5个都道府县"], ["都道府県を5つ塗る", "Color 5 prefectures", "도도부현 5곳 칠하기", "给5个都道府县上色"], ["10都道府県", "10 prefectures", "10개 도도부현", "10个都道府县"], ["都道府県を10塗る", "Color 10 prefectures", "도도부현 10곳 칠하기", "给10个都道府县上色"], ["日本の半分", "Half of Japan", "일본의 절반", "半个日本"], ["都道府県を24塗る", "Color 24 prefectures", "도도부현 24곳 칠하기", "给24个都道府县上色"], ["全国制覇", "All of Japan", "전국 제패", "全国制霸"], ["47都道府県をすべて塗る", "Color all 47 prefectures", "47개 도도부현 모두 칠하기", "给全部47个都道府县上色"], ["まちあるき", "Town walker", "동네 산책", "城镇漫步"], ["市町村を10塗る", "Color 10 municipalities", "시정촌 10곳 칠하기", "给10个市町村上色"], ["地図職人", "Mapmaker", "지도 장인", "地图匠人"], ["市町村を50塗る", "Color 50 municipalities", "시정촌 50곳 칠하기", "给50个市町村上色"], ["はじめての海外", "First trip abroad", "첫 해외", "第一次出国"], ["日本以外の国を1つ塗る", "Color 1 country outside Japan", "일본 외 국가 1곳 칠하기", "给1个日本以外的国家上色"], ["世界をめぐる", "World traveler", "세계 일주", "环游世界"], ["日本以外の国を5つ塗る", "Color 5 countries outside Japan", "일본 외 국가 5곳 칠하기", "给5个日本以外的国家上色"], ["グルメハンター", "Foodie hunter", "맛집 헌터", "美食猎人"], ["グルメを10件投稿する", "Post 10 food spots", "맛집 10곳 올리기", "发布10条美食"], ["スポット通", "Spot expert", "명소 박사", "景点达人"], ["スポットを10件投稿する", "Post 10 spots", "명소 10곳 올리기", "发布10个景点"], ["宿めぐり", "Stay collector", "숙소 순례", "住宿收集家"], ["ステイを5件投稿する", "Post 5 stays", "숙박 5곳 올리기", "发布5个住宿"], ["おまつり好き", "Festival fan", "축제 마니아", "节庆爱好者"], ["イベントを3件投稿する", "Post 3 events", "이벤트 3개 올리기", "发布3个活动"], ["アクティブ派", "Go-getter", "액티브파", "活力派"], ["アクティブを5件投稿する", "Post 5 activities", "액티비티 5개 올리기", "发布5个户外活动"], ["旅を完走", "Trip finisher", "여행 완주", "完成旅行"], ["スタンプラリーの旅を1つ終える", "Finish 1 stamp-rally trip", "스탬프 랠리 여행 1개 끝내기", "完成1次集章旅行"], ["旅の達人", "Travel master", "여행 달인", "旅行达人"], ["スタンプラリーの旅を5つ終える", "Finish 5 stamp-rally trips", "스탬프 랠리 여행 5개 끝내기", "完成5次集章旅行"], ["おすすめで行った", "Went on a tip", "추천 보고 갔어요", "听推荐去了"], ["友達の「行きたい」の場所で投稿する", "Post at a place from your want-to-go list", "친구 추천 장소에서 올리기", "在想去清单的地点发布"], ["ムービー", "Movie", "무비", "影片"], ["動画を1つ投稿する", "Post a video", "동영상 1개 올리기", "发布1个视频"], ["思い出100", "100 memories", "추억 100", "100条回忆"], ["思い出を100件投稿する", "Post 100 memories", "추억 100개 올리기", "发布100条回忆"], ["バッジを手に入れました！", "Badge unlocked!", "배지를 얻었어요!", "获得徽章！"], ["新しい県を塗りました！", "New prefecture colored!", "새 현을 칠했어요!", "新的县上色了！"], ["新しい国を塗りました！", "New country colored!", "새 나라를 칠했어요!", "新的国家上色了！"], ["新しい町を塗りました！", "New town colored!", "새 동네를 칠했어요!", "新的城镇上色了！"], ["海外", "Abroad", "해외", "海外"], ["次の目標", "Next goal", "다음 목표", "下一个目标"], ["バッジ図鑑", "Badge book", "배지 도감", "徽章图鉴"], ["地図で見る", "See on map", "지도에서 보기", "在地图上查看"], ["一度手に入れたバッジは消えません", "Badges you earn are yours to keep", "한 번 얻은 배지는 사라지지 않아요", "获得的徽章不会消失"], ["おかえりなさい！", "Welcome back!", "어서 오세요!", "欢迎回来！"], ["写真", "Photos", "사진", "照片"], ["km（直線）", "km (straight)", "km (직선)", "公里（直线）"], ["アルバムにする", "Make an album", "앨범으로 만들기", "做成相册"], ["旅の記録を見る", "See trip record", "여행 기록 보기", "查看旅行记录"], ["スタンプ", "Stamps", "스탬프", "盖章"]].forEach(r=>I18N_D.set(r[0],r.slice(1)));
@@ -932,12 +943,12 @@ const visOpts=v=>[['all','友達みんな'],...S.groups.map(g=>['g:'+g.id,g.name
 
 /* ---------- 描画 ---------- */
 const ago=ts=>{const m=(now-ts)/60000;if(m<60)return Math.max(1,Math.round(m))+'分前';if(m<1440)return Math.round(m/60)+'時間前';const d=Math.round(m/1440);return d<30?d+'日前':new Date(ts).toLocaleDateString(LOC())};
-const avatar=(u,cls='s')=>u&&u.id==='me'&&S.avatar?`<span class="av ${cls} img" style="background:var(--soft)"><img decoding="async" src="${S.avatar}" alt=""></span>`:`<span class="av ${cls}" style="background:linear-gradient(135deg,${u.c1},${u.c2})">${esc(u.name[0])}</span>`;
+const avatar=(u,cls='s')=>u&&(u.id==='me'?S.avatar:u.img)?`<span class="av ${cls} img" style="background:var(--soft)"><img decoding="async" src="${u.id==='me'?S.avatar:u.img}" alt=""></span>`:`<span class="av ${cls}" style="background:linear-gradient(135deg,${u.c1},${u.c2})">${esc(u.name[0])}</span>`;
 const vthumbBusy=new Set();
 function ensureVideoThumb(p){if(p.img||!p.blob||vthumbBusy.has(p.id))return;vthumbBusy.add(p.id);setTimeout(async()=>{const im=await thumbVideo(p.blob);if(im){p.img=im;await dbPut(p);refreshCard(p.id);try{mainMap&&mainMap.redrawPins()}catch{}}},50)}
-const urls={};const mediaURL=p=>{if(p.kind==='video'&&p.blob){return urls[p.id]||(urls[p.id]=URL.createObjectURL(p.blob))}return null};
+const urls={};const mediaURL=p=>{if(p.kind==='video'&&!p.blob&&p.vurl)return p.vurl;if(p.kind==='video'&&p.blob){return urls[p.id]||(urls[p.id]=URL.createObjectURL(p.blob))}return null};
 function card(p){
-  const u=U(p.uid),lk=S.likes[p.id],nl=(p.uid==='me'?0:3+hash(p.id)%40)+(lk?1:0),cm=S.cmts[p.id]||[],w=S.wish.includes(p.id);
+  const u=U(p.uid),lk=S.likes[p.id],nl=(CL.on?(p.nlo||0):p.uid==='me'?0:3+hash(p.id)%40)+(lk?1:0),cm=S.cmts[p.id]||[],w=S.wish.includes(p.id);
   const v=mediaURL(p);
   const media=v?(ensureVideoThumb(p),`<video src="${v}#t=0.1" ${p.img?`poster="${p.img}"`:''} controls playsinline webkit-playsinline preload="auto"></video>`):(p.img?`<img decoding="async" src="${p.img}" alt="${esc(p.place)}" loading="lazy">`:`<div class="empty">画像を読み込めませんでした</div>`);
   return `<article class="card" data-id="${p.id}">
@@ -975,7 +986,7 @@ function renderProf(){
   if(u.id!=='me'){const gs=S.groups.filter(g=>g.members.includes(u.id));const seen=mine.filter(canSee);const fal=albumsVisible().filter(a=>a.owner===u.id);
     $('#prof').innerHTML=`<div class="ph"><span class="bigav">${avatar(u,'')}</span><div class="nums"><div><b>${seen.length}</b><span>投稿</span></div><div><b>${fal.length}</b><span>アルバム</span></div></div></div>
   <div class="pname">${esc(u.name)} <span style="font:400 13px -apple-system,BlinkMacSystemFont,'Hiragino Sans',Roboto,'Noto Sans JP',sans-serif;color:var(--sub)">${esc(u.handle)}</span></div><p class="bio">${esc(u.bio||'')}</p>
-  <div class="btnrow"><button class="btn ${isFollow(u.id)?'':'pri'}" data-act="follow" data-u="${u.id}">${isFollow(u.id)?'フォロー中':'フォローする'}</button><button class="btn ${isFollow(u.id)?'pri':''}" data-act="newgroup" data-with="${u.id}">グループを作る</button></div>
+  <div class="btnrow"><button class="btn ${isFollow(u.id)?'':'pri'}" data-act="follow" data-u="${u.id}">${CL.on?(isFollow(u.id)?'友達':'友達ではありません'):isFollow(u.id)?'フォロー中':'フォローする'}</button><button class="btn ${isFollow(u.id)?'pri':''}" data-act="newgroup" data-with="${u.id}">グループを作る</button></div>
   ${gs.length?`<p class="bio" style="margin:12px 0 0">一緒のグループ：${gs.map(g=>`<button class="lnk" data-act="mapuser" data-u="g:${g.id}" data-go="1" style="border:0;background:none;color:var(--acc);font-weight:700;padding:4px">${esc(g.name)}</button>`).join('')}</p>`:''}
   <div class="myhead"><h3>アルバム</h3></div>${albumRow([...fal,autoAlbum(u.id,'food'),autoAlbum(u.id,'spot')],false)}
   <p class="note" style="padding:12px 0">個人の地図は本人だけが見られます。共有マップはグループを作ると見られます。</p>
@@ -1010,8 +1021,8 @@ function myPosts(mine){
 const ART='https://claude.ai/artifact/TUbRdhzSgk7w5sgSc64kfF';
 const hex=t=>[...new TextEncoder().encode(t)].map(b=>b.toString(16).padStart(2,'0')).join('');
 const unhex=h=>{try{return new TextDecoder().decode(new Uint8Array(h.match(/../g).map(x=>parseInt(x,16))))}catch{return ''}};
-function inviteLink(){return `${ART}#invite-${S.myid}-${hex(me.name)}`}
-function openInvite(){
+function inviteLink(){if(CL.on)return cloudInviteLink();return `${ART}#invite-${S.myid}-${hex(me.name)}`}
+function openInvite(){if(CL.on)return openCloudInvite();
   const link=inviteLink(),msg=`Hueday（ヒューデイ）で一緒に思い出の地図を塗ろう！\n${me.name}からの招待リンク👇\n${link}`;
   openSheet('友達を追加',`<div style="padding:0 16px;display:grid;gap:10px"><p style="margin:0">招待リンクをLINEで送って、相手が開いて「友達になる」を押すと追加されます。</p>
   <a class="btn line" href="https://line.me/R/share?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">LINEで招待リンクを送る</a>
@@ -1019,6 +1030,7 @@ function openInvite(){
   <p class="note" style="padding:0">試作版の注意：相手がこのリンクを開くには、このページを共有設定にしておく必要があります。また、データは各自の端末に保存されるため、相手の投稿はまだ届きません。</p></div>`);
 }
 function handleInvite(){
+  const ci=(location.hash||'').match(/^#inv-([0-9a-f]{6,32})$/);if(ci){try{history.replaceState(null,'',location.pathname)}catch{location.hash=''}cloudHandleInvite(ci[1]);return}
   const m=(location.hash||'').match(/^#invite-([a-z0-9]+)-([0-9a-f]+)$/);if(!m)return;
   const [,id,h]=m,name=unhex(h)||'友達',fid='f_'+id,self=id===S.myid,already=USERS.some(u=>u.id===fid);
   openSheet('招待が届きました',`<div style="padding:4px 16px;display:grid;gap:12px;justify-items:center;text-align:center"><span style="width:80px;height:80px;display:block">${avatar({name,c1:'#06C755',c2:'#4fb3e8'},'')}</span><b style="font:700 18px -apple-system,BlinkMacSystemFont,'Hiragino Sans',Roboto,'Noto Sans JP',sans-serif">${esc(name)}さんから、Huedayの招待です</b><span style="color:var(--sub);font-size:14px">友達になると、${esc(name)}さんの投稿がホームに届き、一緒にグループの共有マップを作れます。</span>
@@ -1212,7 +1224,7 @@ document.addEventListener('click',async e=>{
   if(a==='close')closeSheet();
   else if(a==='prof'){closeSheet();S.profUser=b.dataset.u;show('prof')}
   else if(a==='mapuser'){S.mapUser=b.dataset.u;S.focus=null;closeSheet();if(b.dataset.go||S.view!=='map')show('map');else renderMap();S.mapUser==='me'?fitHome(mainMap):mainMap.fitUser(S.mapUser)}
-  else if(a==='like'){S.likes[id]=!S.likes[id];save();refreshCard(id)}
+  else if(a==='like'){S.likes[id]=!S.likes[id];save();refreshCard(id);cloudLike(id,S.likes[id])}
   else if(a==='fav'){const i=S.favs.indexOf(id);i<0?S.favs.push(id):S.favs.splice(i,1);ls.set('favs',S.favs);refreshCard(id);if(S.view==='disc')renderResults();toast(i<0?'お気に入りに追加しました':'お気に入りから外しました')}
   else if(a==='wish'){const i=S.wish.indexOf(id);i<0?S.wish.push(id):S.wish.splice(i,1);save();refreshCard(id);try{mainMap&&mainMap.redrawPins()}catch{}toast(i<0?'行きたいリストに追加しました':'行きたいリストから外しました')}
   else if(a==='cfocus'){b.closest('.card').querySelector('.cform input').focus()}
@@ -1227,6 +1239,8 @@ document.addEventListener('click',async e=>{
   else if(a==='renameok'){const v=$('#nameIn').value.trim();if(v){me.name=v;ls.set('me',{name:v,bio:me.bio})}renderAll()}
   else if(a==='invite'){openInvite()}
   else if(a==='copylink'){try{await navigator.clipboard.writeText(inviteLink());toast('リンクをコピーしました。LINEのトークに貼り付けて送ってください')}catch{toast('コピーできませんでした。リンクを長押ししてコピーしてください')}}
+  else if(a==='acceptcode'){b.disabled=true;try{const fid=await cloudAccept(b.dataset.code);renderAll();openSheet('友達になりました',`<p style="padding:0 16px">${esc(b.dataset.name)}さんと友達になりました。一緒に共有マップを作りますか？</p><div class="savebar"><button class="btn pri" data-act="newgroup" data-with="${fid}">${esc(b.dataset.name)}さんとグループを作る</button></div><div class="savebar"><button class="btn" data-act="close">あとで</button></div>`)}catch(e){b.disabled=false;toast('友達になれませんでした。通信を確認してください')}}
+  else if(a==='invcode'){const v=($('#invCode')?.value||'').trim().toLowerCase();if(!/^[0-9a-f]{6,32}$/.test(v)){toast('コードを確認してください');return}closeSheet();cloudHandleInvite(v)}
   else if(a==='acceptinv'){const fid=b.dataset.id,name=b.dataset.name;const list=ls.get('friends',[]);if(!list.some(f=>f.id===fid)){list.push({id:fid,name});ls.set('friends',list)}const c=PAL[hash(fid)%PAL.length];if(!USERS.some(u=>u.id===fid))USERS.push({id:fid,name,handle:'@'+fid.slice(2),c1:c[0],c2:c[1],bio:'LINEの招待リンクで友達になりました'});if(!isFollow(fid))S.follow.push(fid);save();renderAll();openSheet('友達になりました',`<p style="padding:0 16px">${esc(name)}さんと友達になりました。一緒に共有マップを作りますか？</p><div class="savebar"><button class="btn pri" data-act="newgroup" data-with="${fid}">${esc(name)}さんとグループを作る</button></div><div class="savebar"><button class="btn" data-act="close">あとで</button></div>`)}
   else if(a==='myview'){S.myView=b.dataset.v;renderProf()}
   else if(a==='ctry'){const f=countryById[b.dataset.c];S.mapUser='me';S.focus=null;show('map');if(f)mainMap.fit(pathGen.bounds(f))}
@@ -1241,6 +1255,7 @@ document.addEventListener('click',async e=>{
   else if(a==='saveall')saveAll();
   else if(a==='settings')openSettings();
   else if(a==='cleardemo'){const ids=posts.filter(p=>p.uid==='me'&&p.id.startsWith('d')).map(p=>p.id);for(const id of ids)await dbDel(id);posts=posts.filter(p=>!ids.includes(p.id));renderAll();toast(ids.length?'お試しの思い出を'+ids.length+'件消しました':'お試しの思い出はありません')}
+  else if(a==='delaccount'){if(!b.dataset.sure){b.dataset.sure='1';b.textContent='投稿・写真・友達がすべて消えます。もう一度押すと削除します';return}b.disabled=true;b.textContent='削除しています…';try{await cloudDeleteAccount();indexedDB.deleteDatabase('irodori');Object.keys(localStorage).filter(k=>k.startsWith('irodori.')||k.startsWith('hueday.')).forEach(k=>localStorage.removeItem(k));location.reload()}catch(e){b.disabled=false;b.textContent='削除できませんでした。もう一度お試しください'}}
   else if(a==='resetall'){if(!b.dataset.sure){b.dataset.sure='1';b.textContent='本当に消す場合はもう一度押してください';return}try{indexedDB.deleteDatabase('irodori');Object.keys(localStorage).filter(k=>k.startsWith('irodori.')).forEach(k=>localStorage.removeItem(k))}catch{}location.reload()}
   else if(a==='metab'){S.meTab=b.dataset.t;renderProf()}
   else if(a==='pincat'){S.pinCat=S.pinCat===b.dataset.c?null:b.dataset.c;renderMap();toast(S.pinCat?catName(S.pinCat)+'のピンだけ表示しています（もう一度押すと全部に戻ります）':'すべてのピンを表示しています')}
@@ -1285,8 +1300,9 @@ document.addEventListener('click',async e=>{
   else if(a==='newgroup')openGroup(null,b.dataset.with);
   else if(a==='editgroup')openGroup(b.dataset.g);
   else if(a==='gmem'){const c=openGroup.ctx;const u=b.dataset.u;c.sel.has(u)?c.sel.delete(u):c.sel.add(u);const nm=c.name;c.draw();$('#gName').value=nm}
-  else if(a==='gsave'){const c=openGroup.ctx;const ms=[...c.sel];if(!ms.length){toast('メンバーを1人以上選んでください');return}const name=(c.name||'').trim()||ms.map(m=>U(m).name).join('・')+'と';if(c.g){c.g.name=name;c.g.members=ms}else{const g={id:Date.now().toString(36),name,members:ms};S.groups.push(g);S.mapUser='g:'+g.id}save();closeSheet();show('map');mainMap.fitUser(S.mapUser);toast(c.g?'グループを更新しました':'グループを作りました。メンバーの思い出が1枚の地図に集まります')}
-  else if(a==='gdel'){const c=openGroup.ctx;const gid='g:'+c.g.id;for(const p of posts)if(p.uid==='me'&&p.vis===gid){p.vis='me';dbPut(p)}S.albums.forEach(x=>{if(x.vis===gid)x.vis='me'});saveAlbums();S.trips.forEach(x=>{if(x.vis===gid)x.vis='me'});saveTrips();if(S.defvis===gid){S.defvis='all';ls.set('defvis','all')}S.groups=S.groups.filter(x=>x!==c.g);if(S.mapUser==='g:'+c.g.id)S.mapUser='me';save();closeSheet();renderAll();if(S.view==='map')renderMap();toast('グループを削除しました')}
+  else if(a==='gsave'){const c=openGroup.ctx;const ms=[...c.sel];if(!ms.length){toast('メンバーを1人以上選んでください');return}const name=(c.name||'').trim()||ms.map(m=>U(m).name).join('・')+'と';if(c.g){if(CL.on&&c.g.owner&&c.g.owner!=='me'){toast('グループを編集できるのは作った人だけです');return}c.g.name=name;c.g.members=ms;cloudSaveGroup(c.g,false)}else{const g={id:CL.on?newUUID():Date.now().toString(36),name,members:ms,owner:'me'};S.groups.push(g);S.mapUser='g:'+g.id;cloudSaveGroup(g,true)}save();closeSheet();show('map');mainMap.fitUser(S.mapUser);toast(c.g?'グループを更新しました':'グループを作りました。メンバーの思い出が1枚の地図に集まります')}
+  else if(a==='gdel'){const c=openGroup.ctx;const gid='g:'+c.g.id;for(const p of posts)if(p.uid==='me'&&p.vis===gid){p.vis='me';dbPut(p)}S.albums.forEach(x=>{if(x.vis===gid)x.vis='me'});saveAlbums();S.trips.forEach(x=>{if(x.vis===gid)x.vis='me'});saveTrips();if(S.defvis===gid){S.defvis='all';ls.set('defvis','all')}cloudDelGroup(c.g);S.groups=S.groups.filter(x=>x!==c.g);if(S.mapUser==='g:'+c.g.id)S.mapUser='me';save();closeSheet();renderAll();if(S.view==='map')renderMap();toast('グループを削除しました')}
+  else if(a==='follow'&&CL.on){const u=b.dataset.u;if(!S.follow.includes(u)){toast('友達になるには、招待リンクを送ってください');return}if(!b.dataset.sure){b.dataset.sure='1';b.textContent='もう一度押すと友達をやめます';return}const {error}=await CL.sb.rpc('unfriend',{fid:u});if(error){toast('うまくいきませんでした');return}await cloudLoad();renderAll();toast('友達をやめました')}
   else if(a==='follow'){const u=b.dataset.u,i=S.follow.indexOf(u);i<0?S.follow.push(u):S.follow.splice(i,1);save();const card0=b.closest('.card');renderAll();if(card0&&id==null){$$(`.card .fol[data-u="${u}"]`).forEach(x=>x.remove())}toast(i<0?`${U(u).name}さんをフォローしました。ホームに投稿が届きます`:'フォローを外しました')}
   else if(a==='sugg'){S.q=b.dataset.q;$('#q').value=S.q;renderResults()}
   else if(a==='cat'){S.cat=b.dataset.c;renderHere();renderResults()}
@@ -1313,10 +1329,10 @@ async function addPhotoToSpot(tid,sid,file){
 }
 document.addEventListener('change',async e=>{if(setHandlers[e.target.id]){toast(setHandlers[e.target.id](e.target.value));return}
   if(e.target.classList.contains('settg')){S.notif[e.target.dataset.k]=e.target.checked;ls.set('notif',S.notif);renderBadge();renderHome();toast('お知らせの設定を保存しました');return}
-  if(e.target.id==='setName'||e.target.id==='setBio'){const v=e.target.value.trim();if(e.target.id==='setName'){if(!v)return;me.name=v}else me.bio=v;ls.set('me',{name:me.name,bio:me.bio});renderAll();toast('プロフィールを保存しました');return}if(e.target.classList.contains('tdate')){const t=S.trips.find(x=>x.id===e.target.dataset.t);if(!t)return;t[e.target.dataset.k]=e.target.value;if(t.startDate&&t.endDate&&t.endDate<t.startDate){if(e.target.dataset.k==='startDate')t.endDate=t.startDate;else t.startDate=t.endDate}saveTrips();const y=panel.scrollTop;openTrip(t.id);panel.scrollTop=y;if(S.view==='wish')renderWish();toast('日程を'+(tripRange(t)||'未定')+'にしました');return}
+  if(e.target.id==='setName'||e.target.id==='setBio'){const v=e.target.value.trim();if(e.target.id==='setName'){if(!v)return;me.name=v}else me.bio=v;ls.set('me',{name:me.name,bio:me.bio});cloudProfile();renderAll();toast('プロフィールを保存しました');return}if(e.target.classList.contains('tdate')){const t=S.trips.find(x=>x.id===e.target.dataset.t);if(!t)return;t[e.target.dataset.k]=e.target.value;if(t.startDate&&t.endDate&&t.endDate<t.startDate){if(e.target.dataset.k==='startDate')t.endDate=t.startDate;else t.startDate=t.endDate}saveTrips();const y=panel.scrollTop;openTrip(t.id);panel.scrollTop=y;if(S.view==='wish')renderWish();toast('日程を'+(tripRange(t)||'未定')+'にしました');return}
   if(e.target.classList.contains('spfile')){const f=e.target.files[0];if(f)addPhotoToSpot(e.target.dataset.t,e.target.dataset.s,f);e.target.value='';return}if(e.target.classList.contains('vissel')){const p=posts.find(x=>x.id===e.target.dataset.id);if(p){p.vis=e.target.value;await dbPut(p);toast('公開範囲を「'+visLabel(p.vis)+'」に変えました');if(S.view==='map')renderMap()}return}if(e.target.id==='precSel'){S.precision=e.target.value;save()}if(e.target.id==='homePrefSel'){S.homePref=e.target.value;ls.set('homePref',S.homePref);fitHome(mainMap);if(profMap)fitHome(profMap);toast('地図の最初の場所を'+prefName[S.homePref]+'にしました')}if(e.target.id==='homeSel'){S.home=e.target.value;save();renderAll()}});
-document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.closest('.cform');if(!f)return;const v=f.querySelector('input').value.trim();if(!v)return;(S.cmts[f.dataset.id]||(S.cmts[f.dataset.id]=[])).push(['me',v]);save();refreshCard(f.dataset.id)});
-document.addEventListener('dblclick',e=>{const m=e.target.closest('.media');if(m&&!S.likes[m.dataset.id]){S.likes[m.dataset.id]=true;save();refreshCard(m.dataset.id)}});
+document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.closest('.cform');if(!f)return;const v=f.querySelector('input').value.trim();if(!v)return;(S.cmts[f.dataset.id]||(S.cmts[f.dataset.id]=[])).push(['me',v]);save();cloudComment(f.dataset.id,v);refreshCard(f.dataset.id)});
+document.addEventListener('dblclick',e=>{const m=e.target.closest('.media');if(m&&!S.likes[m.dataset.id]){S.likes[m.dataset.id]=true;save();refreshCard(m.dataset.id);cloudLike(m.dataset.id,true)}});
 function refreshCard(id){const p=posts.find(x=>x.id===id);if(!p)return;$$(`.card[data-id="${id}"]`).forEach(c=>c.outerHTML=card(p));if(S.view==='wish')renderWish()}
 $('#pickCancel').addEventListener('click',()=>{const was=picking;picking=null;$('#pickbar').classList.remove('on');$('#pickbar').firstChild.textContent='思い出の場所をタップしてください';if(was==='here')show('disc');else if(typeof was==='string'&&was.startsWith('trip:')){S.planTab='trip';show('wish');openTrip(was.slice(5))}else openAdd()});
 $('#qClear').addEventListener('click',()=>{S.q='';$('#q').value='';renderResults();$('#q').focus()});
@@ -1522,8 +1538,9 @@ function openSettings(){
   <label class="setrow"><span>テーマ</span>${sel('setTheme',S.themeSet,[['auto','端末に合わせる'],['light','ライト'],['dark','ダーク']])}</label>
   <h4>データ</h4>
   <button class="setbtn" data-act="cleardemo">お試しの思い出を消す</button>
-  <button class="setbtn danger" data-act="resetall">すべてのデータを消す</button>
-  <p class="note" style="padding:4px 0 0">Hueday 試作版 0.1 · データはこの端末の中だけに保存されています。</p>
+  ${CL.on?`<button class="setbtn danger" data-act="delaccount">アカウントを削除</button>
+  <p class="note" style="padding:4px 0 0">Hueday 試作版 0.2 · 投稿はサーバーに保存され、公開範囲で選んだ人にだけ見えます。<br>あなたの招待コード：<b>${esc(CL.code)}</b></p>`:`<button class="setbtn danger" data-act="resetall">すべてのデータを消す</button>
+  <p class="note" style="padding:4px 0 0">Hueday 試作版 0.1 · データはこの端末の中だけに保存されています。</p>`}
   </div>`);
 }
 const setHandlers={setMapApp:v=>{S.mapApp=v;ls.set('mapApp',v);renderAll();return MAPAPPS[v]+'で開くようにしました'},
@@ -1553,13 +1570,13 @@ function openAvatarEditor(file){
     $('#avZ').addEventListener('input',e=>{st.z=+e.target.value;draw()});
     openAvatarEditor.save=()=>{const N=256,c=document.createElement('canvas');c.width=c.height=N;const g=c.getContext('2d');const s=base()*st.z,k=N/W();
       g.fillStyle='#fff';g.fillRect(0,0,N,N);const w=im.naturalWidth*s*k,hh=im.naturalHeight*s*k;g.drawImage(im,(N-w)/2+st.x*k,(N-hh)/2+st.y*k,w,hh);
-      S.avatar=c.toDataURL('image/jpeg',0.86);ls.set('avatar',S.avatar);URL.revokeObjectURL(url);closeSheet();renderAll();toast('アイコンを変えました')};
+      S.avatar=c.toDataURL('image/jpeg',0.86);ls.set('avatar',S.avatar);cloudAvatar(S.avatar);URL.revokeObjectURL(url);closeSheet();renderAll();toast('アイコンを変えました')};
   };
   im.onerror=()=>toast('画像を読み込めませんでした');im.src=url;
 }
 document.addEventListener('change',e=>{if(e.target.id==='avIn'&&e.target.files[0]){openAvatarEditor(e.target.files[0]);e.target.value=''}});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act=avsave],[data-act=avclear]');if(!b)return;
-  if(b.dataset.act==='avsave')openAvatarEditor.save&&openAvatarEditor.save();else{S.avatar=null;ls.set('avatar',null);closeSheet();renderAll();toast('アイコンを元に戻しました')}});
+  if(b.dataset.act==='avsave')openAvatarEditor.save&&openAvatarEditor.save();else{S.avatar=null;ls.set('avatar',null);cloudAvatar(null);closeSheet();renderAll();toast('アイコンを元に戻しました')}});
 
 /* ---------- 広告（タイムラインに差し込むネイティブ広告） ----------
    3件目のあと、以降5件ごとに1つ。試作では架空の広告主のサンプル。アプリ版では広告ネットワーク（例：Google AdMob のネイティブ広告）に差し替える */
@@ -1692,11 +1709,211 @@ function makeGLMap(el,{onTap}={}){
     here:(h,instant)=>{const o={center:[h.lon,h.lat],zoom:GL_HOME_Z};instant||first?(map.jumpTo(o),first=false):map.flyTo({...o,duration:900})},
     restyle:()=>{map.setStyle(glStyle())}}
 }
+/* ---------- クラウド（Supabase） ----------
+   SUPA_URL と SUPA_KEY が入っていれば、投稿・いいね・コメント・グループ・友だちをサーバーと同期する。
+   空のとき・つながらないときは、今まで通りこの端末だけで動く。 */
+const SUPA_URL='https://sqsqauvukfwtkpytehxt.supabase.co',SUPA_KEY='sb_publishable_X300PsCqGGcJ-4-mADO9iw_LkvTEHnh';
+const CL={on:false,sb:null,uid:null,code:null,sidOf:{},urls:{},busy:new Map(),lastLoad:0};
+const APP_URL=location.origin+location.pathname;
+const isUUID=s=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s||'');
+const newUUID=()=>crypto.randomUUID?crypto.randomUUID():'10000000-1000-4000-8000-100000000000'.replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
+const cuid=u=>u===CL.uid?'me':u;
+const sidOfPost=p=>p&&(p.sid||(isUUID(p.id)?p.id:null));
+const visToRow=v=>{if(v&&v.startsWith('g:')){const g=v.slice(2);return isUUID(g)&&S.groups.some(x=>x.id===g)?{vis:'group',group_id:g}:{vis:'me',group_id:null}}return {vis:v==='me'?'me':'all',group_id:null}};
+const rowToVis=r=>r.vis==='group'?(r.group_id?'g:'+r.group_id:'me'):r.vis;
+const tsOf=s=>s?Date.parse(s):null;
+const userColor=id=>PAL[hash(id)%PAL.length];
+
+async function signedURLs(paths){
+  const now=Date.now(),need=[...new Set(paths.filter(Boolean))].filter(p=>!CL.urls[p]||CL.urls[p].exp<now+3600e3);
+  for(let i=0;i<need.length;i+=100){const part=need.slice(i,i+100);
+    const {data,error}=await CL.sb.storage.from('media').createSignedUrls(part,7*86400);
+    if(!error&&data)data.forEach((d,k)=>{if(d.signedUrl)CL.urls[part[k]]={u:d.signedUrl,exp:now+7*86400e3}})}
+  return p=>p&&CL.urls[p]?CL.urls[p].u:null;
+}
+async function dataURLBlob(u){const r=await fetch(u);return r.blob()}
+
+function cloudOnboard(){
+  return new Promise(res=>{
+    const el=document.createElement('div');el.id='onboard';
+    el.innerHTML=`<div class="obx"><div class="oblogo">${(document.querySelector('.logo svg')?.outerHTML||'').replace('width="30" height="30"','width="72" height="72"')}</div><h2>Huedayへようこそ</h2><p>友だちに表示される名前を決めてください。</p><input id="obName" maxlength="20" placeholder="名前（例：ゆうき）" autocomplete="nickname" enterkeyhint="done"><button class="btn pri" id="obGo">はじめる</button><p class="obnote">ホーム画面に追加したアプリから使うと、データが消えにくくなります。</p><p class="oberr" id="obErr"></p></div>`;
+    document.body.appendChild(el);const inp=el.querySelector('#obName'),btn=el.querySelector('#obGo');
+    if(me.name&&me.name!=='わたし')inp.value=me.name;
+    const go=async()=>{const name=inp.value.trim();if(!name){inp.focus();return}btn.disabled=true;
+      const {data,error}=await CL.sb.from('profiles').upsert({id:CL.uid,name,bio:me.bio||''}).select().single();
+      if(error){btn.disabled=false;el.querySelector('#obErr').textContent='保存できませんでした。通信を確認してもう一度お試しください';return}
+      el.remove();res(data)};
+    btn.addEventListener('click',go);inp.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+    setTimeout(()=>inp.focus(),300);
+  });
+}
+
+async function cloudStart(){
+  if(!SUPA_URL||!SUPA_KEY||!window.supabase)return false;
+  try{
+    const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false,storageKey:'hueday.auth'}});
+    let {data:{session}}=await sb.auth.getSession();
+    if(!session){const r=await sb.auth.signInAnonymously();if(r.error)throw r.error;session=r.data.session}
+    CL.sb=sb;CL.uid=session.user.id;
+    let {data:pr,error}=await sb.from('profiles').select('*').eq('id',CL.uid).maybeSingle();if(error)throw error;
+    if(!pr){const ld=$('#loading');if(ld)ld.style.visibility='hidden';pr=await cloudOnboard();if(ld)ld.style.visibility=''}
+    CL.on=true;CL.code=pr.invite_code;me.name=pr.name;me.bio=pr.bio||'';ls.set('me',{name:me.name,bio:me.bio});
+    document.body.classList.add('cloud');
+    if(pr.avatar_path){const get=await signedURLs([pr.avatar_path]);const u=get(pr.avatar_path);if(u)S.avatar=u}
+    else if(S.avatar&&S.avatar.startsWith('data:'))cloudAvatar(S.avatar);
+    posts=posts.filter(p=>p.uid==='me'&&!SAMPLE.includes(p));
+    USERS.length=1;S.follow=[];S.groups=[];S.likes={};S.cmts={};
+    await cloudLoad();
+    cloudUploadPending();
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-CL.lastLoad>60e3)cloudRefresh()});
+    return true;
+  }catch(e){console.warn('cloud',e);CL.on=false;setTimeout(()=>toast('サーバーにつながらないため、この端末の中だけで動いています'),800);return false}
+}
+async function cloudRefresh(){if(!CL.on)return;try{await cloudLoad();renderAll()}catch(e){console.warn(e)}}
+
+async function cloudLoad(){
+  const sb=CL.sb;CL.lastLoad=Date.now();
+  const [fr,gr,ps,lk,cm]=await Promise.all([
+    sb.from('friendships').select('friend_id'),
+    sb.from('groups').select('id,name,owner_id,group_members(user_id)').order('created_at'),
+    sb.from('posts').select('*').order('created_at',{ascending:false}).limit(1000),
+    sb.from('likes').select('post_id,user_id'),
+    sb.from('comments').select('id,post_id,user_id,body,created_at').order('created_at')]);
+  for(const r of [fr,gr,ps,lk,cm])if(r.error)throw r.error;
+  const friends=fr.data.map(r=>r.friend_id);
+  const ids=new Set(friends);gr.data.forEach(g=>{ids.add(g.owner_id);g.group_members.forEach(m=>ids.add(m.user_id))});
+  ps.data.forEach(r=>ids.add(r.user_id));cm.data.forEach(c=>ids.add(c.user_id));ids.delete(CL.uid);
+  let profs=[];if(ids.size){const r=await sb.from('profiles').select('id,name,bio,avatar_path').in('id',[...ids]);if(r.error)throw r.error;profs=r.data}
+  const paths=[];profs.forEach(p=>paths.push(p.avatar_path));ps.data.forEach(r=>{paths.push(r.thumb_path);if(r.kind==='video'||!r.thumb_path)paths.push(r.media_path)});
+  const url=await signedURLs(paths);
+  /* 人 */
+  USERS.length=1;
+  for(const p of profs){const c=userColor(p.id);USERS.push({id:p.id,name:p.name,handle:'',c1:c[0],c2:c[1],bio:p.bio||'',img:url(p.avatar_path)})}
+  S.follow=friends;
+  /* グループ */
+  S.groups=gr.data.map(g=>({id:g.id,name:g.name,owner:cuid(g.owner_id),members:g.group_members.map(m=>cuid(m.user_id)).filter(u=>u!=='me')}));
+  /* 投稿 */
+  const local=posts.filter(p=>p.uid==='me'&&!p.remote),bySid={};local.forEach(p=>{const s=sidOfPost(p);if(s)bySid[s]=p});
+  const seen=new Set(),out=[];
+  for(const r of ps.data){
+    const meta={lat:r.lat,lon:r.lon,mc:r.mc||undefined,pc:r.pc||undefined,cc:r.cc||undefined,place:r.place,tag:r.tag,comment:r.comment,cat:r.cat,vis:rowToVis(r),via:r.via?cuid(r.via):undefined};
+    if(r.user_id===CL.uid&&bySid[r.id]){const p=bySid[r.id];Object.assign(p,meta);p.sid=r.id;p.synced=true;seen.add(p);CL.sidOf[p.id]=r.id;continue}
+    const p={id:r.id,sid:r.id,synced:true,remote:true,uid:cuid(r.user_id),kind:r.kind,ts:tsOf(r.created_at),takenAt:tsOf(r.taken_at)||tsOf(r.created_at),...meta,
+      img:url(r.thumb_path)||(r.kind==='photo'?url(r.media_path):null),vurl:r.kind==='video'?url(r.media_path):null,mp:r.media_path,tp:r.thumb_path};
+    CL.sidOf[p.id]=r.id;out.push(p)}
+  /* 別の端末で消された自分の投稿は、この端末からも消す */
+  const full=ps.data.length<1000;
+  for(const p of local){if(seen.has(p))continue;if(p.synced&&full){dbDelRaw(p.id);continue}out.push(p)}
+  posts=out.concat(local.filter(p=>seen.has(p)));
+  /* いいね・コメント */
+  const lid={};posts.forEach(p=>{const s=sidOfPost(p);if(s)lid[s]=p.id});
+  S.likes={};const cnt={};
+  for(const l of lk.data){const id=lid[l.post_id];if(!id)continue;if(l.user_id===CL.uid)S.likes[id]=true;else cnt[id]=(cnt[id]||0)+1}
+  posts.forEach(p=>{p.nlo=cnt[p.id]||0});
+  S.cmts={};for(const c of cm.data){const id=lid[c.post_id];if(!id)continue;(S.cmts[id]||(S.cmts[id]=[])).push([cuid(c.user_id),c.body,c.id])}
+  if(S.mapUser&&S.mapUser.startsWith('g:')&&!grp(S.mapUser))S.mapUser='me';
+  if(S.defvis.startsWith('g:')&&!grp(S.defvis)){S.defvis='all';ls.set('defvis','all')}
+}
+
+/* 自分の投稿をサーバーへ（新規はアップロード、既存は内容だけ更新） */
+function cloudPush(p){
+  if(!CL.on||!p||p.uid!=='me'||String(p.id).startsWith('d'))return;
+  if(CL.busy.has(p.id)){CL.busy.set(p.id,true);return}
+  CL.busy.set(p.id,false);
+  (async()=>{try{await pushOne(p)}catch(e){console.warn('push',e)}
+    const again=CL.busy.get(p.id);CL.busy.delete(p.id);if(again)cloudPush(p)})();
+}
+async function pushOne(p){
+  const sb=CL.sb,st=sb.storage.from('media'),v=visToRow(p.vis);
+  const row={place:(p.place||'').slice(0,80),tag:(p.tag||'').slice(0,30),comment:(p.comment||'').slice(0,1000),cat:p.cat||'spot',lat:p.lat??null,lon:p.lon??null,mc:p.mc||null,pc:p.pc||null,cc:p.cc||null,...v};
+  if(p.synced&&p.sid){
+    if(p.kind==='video'&&p.img&&p.img.startsWith('data:')&&!p.tp){const tp=`${CL.uid}/${p.sid}_t.jpg`;const r=await st.upload(tp,await dataURLBlob(p.img),{contentType:'image/jpeg',upsert:true});if(!r.error){row.thumb_path=tp;p.tp=tp}}
+    const {error}=await sb.from('posts').update(row).eq('id',p.sid);if(error)throw error;return}
+  const sid=p.sid||newUUID();p.sid=sid;CL.sidOf[p.id]=sid;
+  let mp=null,tp=null;
+  if(p.kind==='video'){
+    if(p.blob&&p.blob.size<=50*1024*1024){const ext=/quicktime|mov/i.test(p.blob.type)?'mov':'mp4';mp=`${CL.uid}/${sid}.${ext}`;const r=await st.upload(mp,p.blob,{contentType:p.blob.type||'video/mp4',upsert:true});if(r.error)throw r.error}
+    if(p.img&&p.img.startsWith('data:')){tp=`${CL.uid}/${sid}_t.jpg`;const r=await st.upload(tp,await dataURLBlob(p.img),{contentType:'image/jpeg',upsert:true});if(r.error)tp=null}
+  }else if(p.img&&p.img.startsWith('data:')){mp=`${CL.uid}/${sid}.jpg`;const r=await st.upload(mp,await dataURLBlob(p.img),{contentType:'image/jpeg',upsert:true});if(r.error)throw r.error}
+  const ins={id:sid,...row,kind:p.kind==='video'?'video':'photo',media_path:mp,thumb_path:tp,taken_at:p.takenAt?new Date(p.takenAt).toISOString():null,created_at:new Date(p.ts||Date.now()).toISOString(),via:isUUID(p.via)?p.via:null};
+  const {error}=await sb.from('posts').upsert(ins);if(error)throw error;
+  p.synced=true;p.tp=tp;p.mp=mp;await dbPutRaw(p);
+}
+function cloudUploadPending(){if(!CL.on)return;posts.filter(p=>p.uid==='me'&&!p.synced&&!String(p.id).startsWith('d')).forEach(cloudPush)}
+async function cloudDelete(id){
+  if(!CL.on)return;const sid=CL.sidOf[id]||(isUUID(id)?id:null);if(!sid)return;
+  try{const {data}=await CL.sb.from('posts').select('media_path,thumb_path').eq('id',sid).maybeSingle();
+    const {error}=await CL.sb.from('posts').delete().eq('id',sid);if(error)throw error;
+    const files=[data&&data.media_path,data&&data.thumb_path].filter(Boolean);if(files.length)await CL.sb.storage.from('media').remove(files)}
+  catch(e){console.warn(e);toast('サーバーから消せませんでした。通信を確認してください')}
+}
+async function cloudLike(id,on){
+  if(!CL.on)return;const sid=sidOfPost(posts.find(p=>p.id===id));if(!sid)return;
+  const q=on?CL.sb.from('likes').upsert({post_id:sid,user_id:CL.uid}):CL.sb.from('likes').delete().eq('post_id',sid).eq('user_id',CL.uid);
+  const {error}=await q;if(error)console.warn(error);
+}
+async function cloudComment(id,text){
+  if(!CL.on)return;const sid=sidOfPost(posts.find(p=>p.id===id));if(!sid){toast('アップロードが終わってからコメントできます');return}
+  const {error}=await CL.sb.from('comments').insert({post_id:sid,body:text.slice(0,300)});if(error){console.warn(error);toast('コメントを送れませんでした')}
+}
+async function cloudSaveGroup(g,isNew){
+  if(!CL.on)return true;const sb=CL.sb;
+  try{
+    if(isNew){const {error}=await sb.from('groups').insert({id:g.id,name:g.name});if(error)throw error}
+    else{if(g.owner&&g.owner!=='me'){toast('グループを編集できるのは作った人だけです');await cloudRefresh();return false}
+      const {error}=await sb.from('groups').update({name:g.name}).eq('id',g.id);if(error)throw error}
+    const {data,error}=await sb.from('group_members').select('user_id').eq('group_id',g.id);if(error)throw error;
+    const cur=new Set(data.map(r=>r.user_id).filter(u=>u!==CL.uid)),want=new Set(g.members.filter(isUUID));
+    const add=[...want].filter(u=>!cur.has(u)).map(u=>({group_id:g.id,user_id:u})),del=[...cur].filter(u=>!want.has(u));
+    if(add.length){const r=await sb.from('group_members').insert(add);if(r.error)throw r.error}
+    if(del.length){const r=await sb.from('group_members').delete().eq('group_id',g.id).in('user_id',del);if(r.error)throw r.error}
+    g.owner='me';return true;
+  }catch(e){console.warn(e);toast('グループを保存できませんでした');return false}
+}
+async function cloudDelGroup(g){
+  if(!CL.on)return;
+  if(g.owner&&g.owner!=='me'){const {error}=await CL.sb.from('group_members').delete().eq('group_id',g.id).eq('user_id',CL.uid);if(error)console.warn(error);return}
+  const {error}=await CL.sb.from('groups').delete().eq('id',g.id);if(error){console.warn(error);toast('グループを消せませんでした')}
+}
+async function cloudProfile(){if(!CL.on)return;const {error}=await CL.sb.from('profiles').update({name:me.name.slice(0,20),bio:(me.bio||'').slice(0,160)}).eq('id',CL.uid);if(error)toast('プロフィールをサーバーに保存できませんでした')}
+async function cloudAvatar(dataURL){
+  if(!CL.on)return;const st=CL.sb.storage.from('media'),path=`${CL.uid}/avatar.jpg`;
+  try{if(dataURL){const r=await st.upload(path,await dataURLBlob(dataURL),{contentType:'image/jpeg',upsert:true});if(r.error)throw r.error;delete CL.urls[path]}
+    const {error}=await CL.sb.from('profiles').update({avatar_path:dataURL?path:null}).eq('id',CL.uid);if(error)throw error}
+  catch(e){console.warn(e);toast('アイコンをサーバーに保存できませんでした')}
+}
+async function cloudInviteInfo(code){const {data,error}=await CL.sb.rpc('invite_info',{code});if(error||!data||!data.length)return null;return data[0]}
+async function cloudAccept(code){const {data,error}=await CL.sb.rpc('accept_invite',{code});if(error)throw error;await cloudLoad();return data}
+async function cloudDeleteAccount(){
+  const st=CL.sb.storage.from('media');
+  for(;;){const {data,error}=await st.list(CL.uid,{limit:100});if(error||!data||!data.length)break;const r=await st.remove(data.map(f=>CL.uid+'/'+f.name));if(r.error)break}
+  const {error}=await CL.sb.rpc('delete_me');if(error)throw error;
+  await CL.sb.auth.signOut().catch(()=>{});
+}
+function cloudInviteLink(){return `${APP_URL}?openExternalBrowser=1#inv-${CL.code}`}
+function openCloudInvite(){
+  const link=cloudInviteLink(),msg=`Hueday（ヒューデイ）で一緒に思い出の地図を作ろう！\n${me.name}からの招待リンク👇\n${link}`;
+  openSheet('友達を追加',`<div style="padding:0 16px;display:grid;gap:10px"><p style="margin:0">招待リンクをLINEで送って、相手が開いて「友達になる」を押すと追加されます。</p>
+  <a class="btn line" href="https://line.me/R/share?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">LINEで招待リンクを送る</a>
+  <div class="linkbox"><code>${esc(link)}</code><button class="btn" data-act="copylink">コピー</button></div>
+  <h4 style="margin:8px 0 0">招待コードで追加</h4>
+  <p class="note" style="padding:0">あなたのコード：<b style="user-select:all;font-family:ui-monospace,Menlo,monospace">${esc(CL.code)}</b></p>
+  <div class="linkbox"><input id="invCode" placeholder="友達のコードを入力" autocapitalize="off" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;border:0;background:none;font:inherit;color:inherit"><button class="btn" data-act="invcode">追加</button></div></div>`);
+}
+async function cloudHandleInvite(code){
+  if(!CL.on){toast('サーバーにつながっていないため、招待を受け取れませんでした');return}
+  const inv=await cloudInviteInfo(code);
+  if(!inv){toast('招待リンクが見つかりませんでした');return}
+  const self=inv.id===CL.uid,already=S.follow.includes(inv.id),name=inv.name;
+  openSheet('招待が届きました',`<div style="padding:4px 16px;display:grid;gap:12px;justify-items:center;text-align:center"><span style="width:80px;height:80px;display:block">${avatar({name,c1:'#06C755',c2:'#4fb3e8'},'')}</span><b style="font:700 18px -apple-system,BlinkMacSystemFont,'Hiragino Sans',Roboto,'Noto Sans JP',sans-serif">${esc(name)}さんから、Huedayの招待です</b><span style="color:var(--sub);font-size:14px">友達になると、おたがいの投稿がホームに届き、一緒にグループの共有マップを作れます。</span>
+  ${self?'<p class="note">これはあなた自身の招待リンクです。友達が開くと、この画面が表示されます。</p>':already?'<p class="note">すでに友達です。</p>':`<button class="btn pri" style="width:100%" data-act="acceptcode" data-code="${esc(code)}" data-name="${esc(name)}">友達になる</button>`}</div>`);
+}
+
 /* ---------- 起動 ---------- */
 (async()=>{
   try{await loadGeo()}catch(err){$('#loading').textContent='地図データを読み込めませんでした';return}
   for(const p of posts){const r=locate(p.lon,p.lat);if(r)Object.assign(p,r)}
-  const mine=await dbAll();posts.push(...mine);
+  const mine=await dbAll();posts.push(...mine);await cloudStart();
   const useGL=await glAvailable();
   const mapTap=(f,base)=>{
     if(typeof picking==='string'&&picking.startsWith('trip:')){const tid=picking.slice(5);const ll=projection.invert(base);picking=null;$('#pickbar').classList.remove('on');$('#pickbar').firstChild.textContent='思い出の場所をタップしてください';if(!ll)return;const r=locate(ll[0],ll[1])||{};const label=r.mc?muniName(r.mc):r.cc?cName(r.cc):'選んだ場所';openTrip.pend={lat:ll[1],lon:ll[0],r,label};S.planTab='trip';show('wish');openSheet('スポットを追加',`<div class="f" style="padding:0 16px;display:grid;gap:10px"><p style="margin:0">${esc(r.mc?prefName[r.pc]+' '+muniName(r.mc):label)}</p><input id="spName" value="${esc(openPlan.pendName||'')}" placeholder="場所の名前（例：〇〇水族館）" maxlength="30"><select id="spCat" style="border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;background:var(--card)">${CATS.map(c=>`<option value="${c[0]}">${c[1]}</option>`).join('')}</select></div><div class="savebar"><button class="btn pri" data-act="tspotsave" data-t="${tid}">追加する</button></div><p class="note">地図はおおまかな位置です。正確な場所は名前で探すと確実です。</p>`);return}
