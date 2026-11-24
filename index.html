@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hueday 詳しい地図（建物・道路・店名）</title>
+<!--
+  Hueday 詳しい地図モジュール
+  ------------------------------------------------------------
+  ・地図の表示：MapLibre GL JS（無料・オープンソース）
+  ・地図データ：OpenStreetMap を Protomaps 形式（.pmtiles 1ファイル）にしたもの
+                → Cloudflare R2 などに置いて読み込む（APIキー不要・従量課金なし）
+  ・入っているもの：建物の形・すべての道路・鉄道・駅・お店や施設の名前・地名
+  ・Hueday の投稿ピン（カテゴリ別の色）と、拡大時の写真ピンを重ねて表示
+  ・ライブラリは vendor/ に同梱（外部CDNに依存しない）
+-->
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<style>
+  :root{--acc:#ff5a3c;--ink:#1b1f27;--sub:#6b7280;--card:#fff;--line:#e5e7eb}
+  html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;color:var(--ink)}
+  #map{position:fixed;inset:0}
+  /* 上のカテゴリ切り替え */
+  .cats{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:10px;right:10px;display:flex;gap:6px;overflow-x:auto;z-index:2;scrollbar-width:none}
+  .cats::-webkit-scrollbar{display:none}
+  .cats button{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 12px;font-size:13px;font-weight:700;box-shadow:0 2px 8px #0001;display:flex;gap:6px;align-items:center}
+  .cats button i{width:10px;height:10px;border-radius:50%}
+  .cats button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  /* 左下：現在地ボタン */
+  .here{position:fixed;left:12px;bottom:calc(env(safe-area-inset-bottom) + 24px);z-index:2;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:10px 14px;font-weight:700;font-size:14px;box-shadow:0 2px 10px #0002}
+  /* 投稿ピン */
+  .pin{width:30px;height:40px;cursor:pointer;filter:drop-shadow(0 2px 3px #0004)}
+  .ppin{width:58px;height:58px;border-radius:50%;border:3px solid #fff;box-shadow:0 3px 10px #0005;background:#ddd center/cover;cursor:pointer}
+  /* ピンを押したときのカード */
+  .maplibregl-popup-content{border-radius:14px;padding:0;overflow:hidden;width:220px}
+  .pop img{width:100%;height:120px;object-fit:cover;display:block}
+  .pop .b{padding:10px 12px;display:grid;gap:6px}
+  .pop b{font-size:14px}.pop small{color:var(--sub)}
+  .pop a{display:block;text-align:center;background:var(--acc);color:#fff;text-decoration:none;border-radius:999px;padding:8px;font-weight:700;font-size:13px}
+  .err{position:fixed;left:12px;right:12px;bottom:90px;z-index:3;background:#fff3cd;border:1px solid #f0d68a;border-radius:12px;padding:10px 12px;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="cats" id="cats"></div>
+<button class="here" id="here">◎ 現在地</button>
+<div class="err" id="err"></div>
+
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/pmtiles.js"></script>
+<script src="vendor/basemaps.js"></script>
+<script>
+/* =========================================================
+   設定（ここだけ書き換える）
+   ========================================================= */
+const CONFIG = {
+  // ① 自分で用意した地図ファイル（Cloudflare R2 の公開URL）
+  //    例：'https://pub-xxxxxxxx.r2.dev/japan.pmtiles'
+  PMTILES_URL: 'https://pub-dc41bcd297834b5ca757a907600e7773.r2.dev/japan.pmtiles',
+
+  // ② 地図ファイルを用意する前に試したいとき用（任意）
+  //    Protomaps の無料APIキー（非商用・お試し用）。本番では使わない
+  //    取得：https://protomaps.com/api
+  PROTOMAPS_API_KEY: '',
+
+  // 地図の見た目：'light'（白っぽい）/ 'white' / 'grayscale' / 'dark'
+  FLAVOR: 'light',
+  // 地名・店名の言語：'ja' / 'en' / 'ko' / 'zh-Hans'
+  LANG: 'ja',
+  // 最初に表示する場所（福岡・博多駅周辺）
+  START: { center: [130.4205, 33.5897], zoom: 14 },
+  // 道案内に使う地図アプリ
+  NAV_URL: (lat, lon) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`,
+};
+
+/* Hueday のカテゴリ（アプリ本体と同じ） */
+const CATS = [
+  ['spot',  'スポット',   '#3a8fd6'],
+  ['food',  'グルメ',     '#e8742c'],
+  ['event', 'イベント',   '#8a5cd6'],
+  ['active','アクティブ', '#d64f7a'],
+  ['stay',  'ステイ',     '#2a9d8f'],
+];
+const catColor = c => (CATS.find(x => x[0] === c) || CATS[0])[2];
+
+/* 投稿データ（本体アプリでは IndexedDB の posts を渡す）
+   形式：{ id, lat, lon, cat, place, img(画像URL or dataURL), date } */
+const POSTS = [
+  { id: 'a', lat: 33.5902, lon: 130.4207, cat: 'spot',  place: '博多駅',         img: '', date: '2026-11-20' },
+  { id: 'b', lat: 33.5916, lon: 130.3990, cat: 'food',  place: '天神のラーメン屋', img: '', date: '2026-11-18' },
+  { id: 'c', lat: 33.5935, lon: 130.4116, cat: 'event', place: '中洲の屋台',      img: '', date: '2026-11-10' },
+];
+
+/* =========================================================
+   地図の準備
+   ========================================================= */
+const errBox = document.getElementById('err');
+function showErr(msg) { errBox.textContent = msg; errBox.style.display = 'block'; }
+
+// pmtiles:// で始まるURLを MapLibre が読めるようにする
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', protocol.tile);
+
+function sourceDef() {
+  if (CONFIG.PMTILES_URL) {
+    return { type: 'vector', url: 'pmtiles://' + CONFIG.PMTILES_URL,
+             attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>' };
+  }
+  if (CONFIG.PROTOMAPS_API_KEY) {
+    return { type: 'vector', url: `https://api.protomaps.com/tiles/v4.json?key=${CONFIG.PROTOMAPS_API_KEY}`,
+             attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>' };
+  }
+  return null;
+}
+
+function buildStyle() {
+  const src = sourceDef();
+  if (!src) {
+    showErr('地図ファイルが設定されていません。index.html の CONFIG.PMTILES_URL に R2 のURLを入れてください。');
+  }
+  const layers = src
+    ? basemaps.layers('protomaps', basemaps.namedFlavor(CONFIG.FLAVOR), { lang: CONFIG.LANG })
+    : [{ id: 'bg', type: 'background', paint: { 'background-color': '#eef0f3' } }];
+
+  // 建物を少しだけ立体に見せる（拡大したときだけ）。Hueday の白地図の雰囲気に合わせて淡い色
+  const bi = layers.findIndex(l => l.id === 'buildings');
+  if (bi >= 0) {
+    layers[bi].paint = { 'fill-color': '#e2e4e9', 'fill-opacity': 0.9, 'fill-outline-color': '#cfd3da' };
+  }
+  return {
+    version: 8,
+    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${CONFIG.FLAVOR}`,
+    sources: src ? { protomaps: src } : {},
+    layers,
+  };
+}
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: buildStyle(),
+  center: CONFIG.START.center,
+  zoom: CONFIG.START.zoom,
+  maxZoom: 19,
+  attributionControl: { compact: true },
+  dragRotate: false,          // SNS用途なので回転はオフ（迷子防止）
+  pitchWithRotate: false,
+});
+map.touchZoomRotate.disableRotation();
+map.on('error', e => {
+  const m = String(e && e.error && e.error.message || '');
+  if (/pmtiles|fetch|CORS|403|404/i.test(m)) showErr('地図ファイルを読み込めませんでした。URLとCORS設定を確認してください：' + m);
+});
+
+/* =========================================================
+   投稿ピン
+   ・ふだんはカテゴリ色のピン
+   ・ズーム16以上（街の一角くらい）で写真の丸ピンに切り替え
+   ========================================================= */
+let filterCat = null;
+const markers = [];
+
+function pinEl(p, photo) {
+  const el = document.createElement('div');
+  if (photo && p.img) {
+    el.className = 'ppin';
+    el.style.backgroundImage = `url("${p.img}")`;
+    el.style.borderColor = catColor(p.cat);
+  } else {
+    el.className = 'pin';
+    el.innerHTML = `<svg viewBox="-15 -40 30 40" width="30" height="40">
+      <path d="M0 0C-2.5-7-13-12-13-23a13 13 0 1 1 26 0C13-12 2.5-7 0 0z" fill="${catColor(p.cat)}" stroke="#fff" stroke-width="2"/>
+      <circle cy="-23" r="5" fill="#fff"/></svg>`;
+  }
+  return el;
+}
+
+function popupHTML(p) {
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return `<div class="pop">${p.img ? `<img src="${p.img}" alt="">` : ''}
+    <div class="b"><b>${esc(p.place)}</b><small>${esc(p.date)}</small>
+    <a href="${CONFIG.NAV_URL(p.lat, p.lon)}" target="_blank" rel="noopener">ここへ行く</a></div></div>`;
+}
+
+function drawPins() {
+  markers.forEach(m => m.remove());
+  markers.length = 0;
+  const photo = map.getZoom() >= 16;
+  POSTS.filter(p => !filterCat || p.cat === filterCat).forEach(p => {
+    const m = new maplibregl.Marker({ element: pinEl(p, photo), anchor: photo ? 'center' : 'bottom' })
+      .setLngLat([p.lon, p.lat])
+      .setPopup(new maplibregl.Popup({ offset: photo ? 32 : 38, closeButton: false }).setHTML(popupHTML(p)))
+      .addTo(map);
+    markers.push(m);
+  });
+}
+
+// 写真ピン ↔ 普通のピン の切り替えは、ズームが境目をまたいだときだけ描き直す
+let lastPhoto = null;
+map.on('zoomend', () => {
+  const ph = map.getZoom() >= 16;
+  if (ph !== lastPhoto) { lastPhoto = ph; drawPins(); }
+});
+map.on('load', () => { lastPhoto = map.getZoom() >= 16; drawPins(); });
+
+/* カテゴリで絞り込み（もう一度押すと全部） */
+const catsBox = document.getElementById('cats');
+catsBox.innerHTML = CATS.map(c => `<button data-c="${c[0]}"><i style="background:${c[2]}"></i>${c[1]}</button>`).join('');
+catsBox.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  filterCat = filterCat === b.dataset.c ? null : b.dataset.c;
+  catsBox.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.c === filterCat));
+  drawPins();
+});
+
+/* 現在地（自分のサイトとして https で公開すると使える） */
+document.getElementById('here').addEventListener('click', () => {
+  if (!navigator.geolocation) return showErr('この端末では現在地を使えません');
+  navigator.geolocation.getCurrentPosition(
+    pos => map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 16 }),
+    () => showErr('現在地を取得できませんでした（位置情報の許可を確認してください）'),
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+});
+
+/* 本体アプリから使うための窓口（例：HuedayMap.setPosts(posts)） */
+window.HuedayMap = {
+  map,
+  setPosts(list) { POSTS.length = 0; list.forEach(p => POSTS.push(p)); drawPins(); },
+  flyTo(lat, lon, zoom = 16) { map.flyTo({ center: [lon, lat], zoom }); },
+};
+</script>
+</body>
+</html>
